@@ -14,10 +14,43 @@ const (
 )
 
 type Config struct {
-	CloudflareToken string `json:"cloudflare_token"`
-	Domain          string `json:"domain"`
-	AdminEmail      string `json:"admin_email"`
-	Apps            []App  `json:"apps"`
+	CloudflareToken string        `json:"cloudflare_token"`
+	Domain          string        `json:"domain"`
+	AdminEmail      string        `json:"admin_email"`
+	Apps            []App         `json:"apps"`
+	Security        SecurityConfig `json:"security"`
+	Remotes         []Remote      `json:"remotes"`
+}
+
+type Remote struct {
+	Name         string   `json:"name"`
+	URL          string   `json:"url"`
+	AuthToken    string   `json:"auth_token"`
+	Permissions  []string `json:"permissions"`
+	Default      bool     `json:"default"`
+	LastUsed     string   `json:"last_used,omitempty"`
+}
+
+type SecurityConfig struct {
+	EncryptionKey           string `json:"encryption_key"`
+	TokenExpirationDays     int    `json:"token_expiration_days"`
+	MaxFailedAttempts       int    `json:"max_failed_attempts"`
+	RateLimitPerMinute      int    `json:"rate_limit_per_minute"`
+	RequireHTTPS            bool   `json:"require_https"`
+	AllowedIPs              []string `json:"allowed_ips"`
+	AuditLogRetentionDays   int    `json:"audit_log_retention_days"`
+}
+
+// DefaultSecurityConfig returns default security configuration
+func DefaultSecurityConfig() SecurityConfig {
+	return SecurityConfig{
+		TokenExpirationDays:   30,
+		MaxFailedAttempts:     5,
+		RateLimitPerMinute:    60,
+		RequireHTTPS:         true,
+		AllowedIPs:           []string{},
+		AuditLogRetentionDays: 90,
+	}
 }
 
 type App struct {
@@ -56,7 +89,9 @@ func loadConfig() (*Config, error) {
 	// Check if config file exists
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		return &Config{
-			Apps: []App{},
+			Apps:     []App{},
+			Security: DefaultSecurityConfig(),
+			Remotes:  []Remote{},
 		}, nil
 	}
 
