@@ -54,13 +54,18 @@ func DefaultSecurityConfig() SecurityConfig {
 }
 
 type App struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	Domain  string `json:"domain"`
-	Port    int    `json:"port"`
-	Command string `json:"command"`
-	Source  string `json:"source,omitempty"`
-	Status  string `json:"status"`
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Domain     string `json:"domain"`
+	Port       int    `json:"port"`
+	Command    string `json:"command"`
+	Source     string `json:"source,omitempty"`
+	Status     string `json:"status"`
+	// Deployment fields
+	RemotePath string `json:"remote_path,omitempty"`
+	BuildType  string `json:"build_type,omitempty"`
+	Remote     string `json:"remote,omitempty"`
+	PID        int    `json:"pid,omitempty"`
 }
 
 func getConfigPath() (string, error) {
@@ -170,10 +175,11 @@ func addApp() {
 		os.Exit(1)
 	}
 
-	if config.CloudflareToken == "" || config.Domain == "" || config.AdminEmail == "" {
-		fmt.Println("Please run 'hotify-cli init' first to set up configuration")
-		os.Exit(1)
-	}
+	// Skip Cloudflare check for deployment-only use
+	// if config.CloudflareToken == "" || config.Domain == "" || config.AdminEmail == "" {
+	// 	fmt.Println("Please run 'hotify-cli init' first to set up configuration")
+	// 	os.Exit(1)
+	// }
 
 	// Parse flags
 	addCmd := flag.NewFlagSet("add", flag.ExitOnError)

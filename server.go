@@ -1,17 +1,24 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
 
 var (
-	server *http.Server
-	mu     sync.Mutex
+	server        *http.Server
+	mu            sync.Mutex
+	apiKeyManager *APIKeyManager
+	auditLogger   *AuditLogger
 )
 
 type ServerStatus struct {
@@ -25,6 +32,44 @@ type ServerStatus struct {
 var serverStatus ServerStatus
 
 func startServer(port int) {
+	// Initialize security managers
+	var err error
+	apiKeyManager, err = NewAPIKeyManager()
+	if err != nil {
+		log.Fatalf("Error creating API key manager: %v", err)
+	}
+
+	// Create initial admin key if no keys exist
+	keys := apiKeyManager.ListKeys()
+	if len(keys) == 0 {
+		log.Println("No API keys found, creating initial admin key...")
+		security, err := NewSecurityManager()
+		if err != nil {
+			log.Fatalf("Error creating security manager for bootstrap: %v", err)
+		}
+		initialToken, err := security.GenerateToken()
+		if err != nil {
+			log.Fatalf("Error generating bootstrap token: %v", err)
+		}
+		_, err = apiKeyManager.AddKey("admin-bootstrap", AllPermissions, initialToken)
+		if err != nil {
+			log.Printf("Warning: Failed to create initial admin key: %v", err)
+		} else {
+			log.Println("==============================================")
+			log.Println("Initial admin key created successfully!")
+			log.Printf("Token: %s", initialToken)
+			log.Println("==============================================")
+			log.Println("IMPORTANT: Store this token securely!")
+			log.Println("Use it to authenticate: hotify-cli auth --url <url> --token <token> --name admin-bootstrap")
+			log.Println("Then create additional API keys and remove this bootstrap key.")
+		}
+	}
+
+	auditLogger, err = NewAuditLogger()
+	if err != nil {
+		log.Fatalf("Error creating audit logger: %v", err)
+	}
+
 	config, err := loadConfig()
 	if err != nil {
 		log.Fatalf("Error loading config: %v", err)
@@ -39,17 +84,31 @@ func startServer(port int) {
 
 	mux := http.NewServeMux()
 
-	// API endpoints
+	// Authentication endpoints (no auth required)
+	mux.HandleFunc("/api/auth/login", handleAuthLogin)
+	mux.HandleFunc("/api/auth/validate", handleAuthValidate)
+	mux.HandleFunc("/api/auth/refresh", handleAuthRefresh)
+	mux.HandleFunc("/api/auth/logout", handleAuthLogout)
+
+	// API key endpoints (auth required)
+	mux.HandleFunc("/api/api-keys", authMiddleware(handleAPIKeys))
+	mux.HandleFunc("/api/api-keys/", authMiddleware(handleAPIKeyDetail))
+
+	// Existing endpoints (auth required)
 	mux.HandleFunc("/", handleHome)
-	mux.HandleFunc("/api/status", handleStatusAPI)
+	mux.HandleFunc("/api/status", authMiddleware(handleStatusAPI))
 	mux.HandleFunc("/api/health", handleHealthAPI)
-	mux.HandleFunc("/api/config", handleConfigAPI)
-	mux.HandleFunc("/api/apps", handleAppsAPI)
-	mux.HandleFunc("/api/apps/add", handleAddAppAPI)
-	mux.HandleFunc("/api/apps/edit", handleEditAppAPI)
-	mux.HandleFunc("/api/apps/remove", handleRemoveAppAPI)
-	mux.HandleFunc("/api/apps/setup-dns", handleSetupDNSAPI)
-	mux.HandleFunc("/api/apps/setup-traefik", handleSetupTraefikAPI)
+	mux.HandleFunc("/api/config", authMiddleware(handleConfigAPI))
+	mux.HandleFunc("/api/apps", authMiddleware(handleAppsAPI))
+	mux.HandleFunc("/api/apps/add", authMiddleware(handleAddAppAPI))
+
+	// Deployment endpoints (auth required)
+	mux.HandleFunc("/api/deploy", authMiddleware(handleDeployAPI))
+	mux.HandleFunc("/api/apps/", authMiddleware(handleAppManagementAPI))
+	mux.HandleFunc("/api/apps/edit", authMiddleware(handleEditAppAPI))
+	mux.HandleFunc("/api/apps/remove", authMiddleware(handleRemoveAppAPI))
+	mux.HandleFunc("/api/apps/setup-dns", authMiddleware(handleSetupDNSAPI))
+	mux.HandleFunc("/api/apps/setup-traefik", authMiddleware(handleSetupTraefikAPI))
 
 	server = &http.Server{
 		Addr:    fmt.Sprintf(":%d", port),
@@ -704,4 +763,611 @@ func handleSetupTraefikAPI(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+}
+
+// Authentication Middleware
+func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		token := extractBearerToken(r)
+		if token == "" {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		// Validate token
+		key, err := apiKeyManager.ValidateKey(token)
+		if err != nil {
+			auditLogger.LogEvent(AuditEvent{
+				EventType: AuditEventAuthFailed,
+				Details:   fmt.Sprintf("Token validation failed: %v", err),
+				Success:   false,
+			})
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		// Add key info to request context
+		r.Header.Set("X-API-Key-Name", key.Name)
+
+		next(w, r)
+	}
+}
+
+// extractBearerToken extracts Bearer token from Authorization header
+func extractBearerToken(r *http.Request) string {
+	auth := r.Header.Get("Authorization")
+	if auth == "" {
+		return ""
+	}
+
+	parts := strings.Split(auth, " ")
+	if len(parts) != 2 || parts[0] != "Bearer" {
+		return ""
+	}
+
+	return parts[1]
+}
+
+// Authentication API Handlers
+func handleAuthLogin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var payload struct {
+		Token string `json:"token"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate token
+	key, err := apiKeyManager.ValidateKey(payload.Token)
+	if err != nil {
+		auditLogger.LogEvent(AuditEvent{
+			EventType: AuditEventAuthFailed,
+			Details:   fmt.Sprintf("Login failed: %v", err),
+			Success:   false,
+		})
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	auditLogger.LogEvent(AuditEvent{
+		EventType: AuditEventAuthLogin,
+		TokenName: key.Name,
+		Details:   "Successful login",
+		Success:   true,
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"key_name": key.Name,
+		"permissions": key.Permissions,
+	})
+}
+
+func handleAuthValidate(w http.ResponseWriter, r *http.Request) {
+	token := extractBearerToken(r)
+	if token == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	key, err := apiKeyManager.ValidateKey(token)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"valid": true,
+		"key_name": key.Name,
+		"permissions": key.Permissions,
+	})
+}
+
+func handleAuthRefresh(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	token := extractBearerToken(r)
+	if token == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	key, err := apiKeyManager.ValidateKey(token)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Regenerate token
+	newKey, err := apiKeyManager.RegenerateKey(key.Name)
+	if err != nil {
+		http.Error(w, "Error regenerating token", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"token": newKey.Token,
+	})
+}
+
+func handleAuthLogout(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	token := extractBearerToken(r)
+	if token == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	key, err := apiKeyManager.ValidateKey(token)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	auditLogger.LogEvent(AuditEvent{
+		EventType: AuditEventAuthLogout,
+		TokenName: key.Name,
+		Details:   "Logged out",
+		Success:   true,
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+	})
+}
+
+// API Key Management Handlers
+func handleAPIKeys(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "GET":
+		keys := apiKeyManager.ListKeys()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"keys": keys,
+		})
+	case "POST":
+		var payload struct {
+			Name        string   `json:"name"`
+			Token       string   `json:"token"`
+			Permissions []string `json:"permissions"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			return
+		}
+
+		// Convert string permissions to Permission type
+		var perms []Permission
+		for _, perm := range payload.Permissions {
+			perms = append(perms, Permission(perm))
+		}
+
+		key, err := apiKeyManager.AddKey(payload.Name, perms, payload.Token)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"key":     key,
+		})
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func handleAPIKeyDetail(w http.ResponseWriter, r *http.Request) {
+	// Extract key name from URL path
+	path := strings.TrimPrefix(r.URL.Path, "/api/api-keys/")
+	parts := strings.Split(path, "/")
+	keyName := parts[0]
+
+	switch r.Method {
+	case "GET":
+		key, err := apiKeyManager.GetKey(keyName)
+		if err != nil {
+			http.Error(w, "API key not found", http.StatusNotFound)
+			return
+		}
+
+		// Mask token for display
+		key.Token = maskToken(key.Token)
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(key)
+
+	case "DELETE":
+		if err := apiKeyManager.RemoveKey(keyName); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+		})
+
+	case "POST":
+		// Check if it's a regenerate or permissions update
+		path := r.URL.Path
+		if strings.HasSuffix(path, "/regenerate") || strings.HasSuffix(path, "/regenerate/") {
+			key, err := apiKeyManager.RegenerateKey(keyName)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": true,
+				"token":   key.Token,
+			})
+		} else if strings.HasSuffix(path, "/permissions") || strings.HasSuffix(path, "/permissions/") {
+			var payload struct {
+				Add    []string `json:"add"`
+				Remove []string `json:"remove"`
+			}
+
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				http.Error(w, "Invalid request body", http.StatusBadRequest)
+				return
+			}
+
+			var addPerms, removePerms []Permission
+			for _, perm := range payload.Add {
+				addPerms = append(addPerms, Permission(perm))
+			}
+			for _, perm := range payload.Remove {
+				removePerms = append(removePerms, Permission(perm))
+			}
+
+			if err := apiKeyManager.UpdatePermissions(keyName, addPerms, removePerms); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": true,
+			})
+		} else {
+			http.Error(w, "Unknown action", http.StatusBadRequest)
+		}
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleDeployAPI handles deployment requests
+func handleDeployAPI(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var payload struct {
+		AppID       string `json:"app_id"`
+		Data        string `json:"data"`        // base64 encoded binary or tar.gz
+		DataType    string `json:"data_type"`  // "binary" or "folder"
+		TargetPath  string `json:"target_path"` // where to deploy
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	config, err := loadConfig()
+	if err != nil {
+		http.Error(w, "Error loading config", http.StatusInternalServerError)
+		return
+	}
+
+	// Find app
+	var app *App
+	for i := range config.Apps {
+		if config.Apps[i].ID == payload.AppID {
+			app = &config.Apps[i]
+			break
+		}
+	}
+
+	if app == nil {
+		http.Error(w, "App not found", http.StatusNotFound)
+		return
+	}
+
+	// Set default target path if not specified
+	targetPath := payload.TargetPath
+	if targetPath == "" {
+		targetPath = fmt.Sprintf("/home/%s/apps/%s", "dk1", payload.AppID)
+	}
+
+	// Decode base64 data
+	decodedData, err := base64.StdEncoding.DecodeString(payload.Data)
+	if err != nil {
+		http.Error(w, "Error decoding data", http.StatusBadRequest)
+		return
+	}
+
+	// Handle deployment based on type
+	var deployError error
+	switch payload.DataType {
+	case "binary":
+		deployError = deployBinary(decodedData, targetPath)
+	case "folder":
+		deployError = deployFolder(decodedData, targetPath)
+	default:
+		deployError = fmt.Errorf("unknown data type: %s", payload.DataType)
+	}
+
+	if deployError != nil {
+		auditLogger.LogEvent(AuditEvent{
+			EventType: AuditEventAuthFailed,
+			TokenName: r.Header.Get("X-API-Key-Name"),
+			Details:   fmt.Sprintf("Deployment failed for app %s: %v", payload.AppID, deployError),
+			Success:   false,
+		})
+		http.Error(w, deployError.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Update app remote path in config
+	for i := range config.Apps {
+		if config.Apps[i].ID == payload.AppID {
+			config.Apps[i].RemotePath = targetPath
+			config.Apps[i].Status = "deployed"
+			saveConfig(config)
+			break
+		}
+	}
+
+	auditLogger.LogEvent(AuditEvent{
+		EventType: AuditEventDeploy,
+		TokenName: r.Header.Get("X-API-Key-Name"),
+		Details:   fmt.Sprintf("Deployment successful for app: %s to %s", payload.AppID, targetPath),
+		Success:   true,
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":     true,
+		"message":     "Deployment successful",
+		"app_id":      payload.AppID,
+		"target_path":  targetPath,
+		"data_type":   payload.DataType,
+	})
+}
+
+// deployBinary deploys a single binary file
+func deployBinary(data []byte, targetPath string) error {
+	// Ensure directory exists
+	dir := filepath.Dir(targetPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("error creating directory: %v", err)
+	}
+
+	// Write binary
+	if err := os.WriteFile(targetPath, data, 0755); err != nil {
+		return fmt.Errorf("error writing binary: %v", err)
+	}
+
+	return nil
+}
+
+// deployFolder deploys a tar.gz folder
+func deployFolder(data []byte, targetPath string) error {
+	// Ensure directory exists
+	if err := os.MkdirAll(targetPath, 0755); err != nil {
+		return fmt.Errorf("error creating directory: %v", err)
+	}
+
+	// Create temporary file for tar.gz
+	tmpFile := "/tmp/deploy_" + fmt.Sprintf("%d", time.Now().Unix()) + ".tar.gz"
+	if err := os.WriteFile(tmpFile, data, 0644); err != nil {
+		return fmt.Errorf("error writing temp file: %v", err)
+	}
+	defer os.Remove(tmpFile)
+
+	// Extract tar.gz
+	cmd := exec.Command("tar", "-xzf", tmpFile, "-C", targetPath)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("error extracting tar.gz: %v\nOutput: %s", err, string(output))
+	}
+
+	return nil
+}
+
+// handleAppManagementAPI handles app-specific operations (start/stop/restart/status/logs)
+func handleAppManagementAPI(w http.ResponseWriter, r *http.Request) {
+	// Extract app ID from URL path
+	path := strings.TrimPrefix(r.URL.Path, "/api/apps/")
+	parts := strings.Split(path, "/")
+	appID := parts[0]
+
+	if len(parts) < 2 {
+		http.Error(w, "Invalid request path", http.StatusBadRequest)
+		return
+	}
+
+	action := parts[1]
+
+	config, err := loadConfig()
+	if err != nil {
+		http.Error(w, "Error loading config", http.StatusInternalServerError)
+		return
+	}
+
+	// Find app
+	var app *App
+	for i := range config.Apps {
+		if config.Apps[i].ID == appID {
+			app = &config.Apps[i]
+			break
+		}
+	}
+
+	if app == nil {
+		http.Error(w, "App not found", http.StatusNotFound)
+		return
+	}
+
+	switch action {
+	case "start":
+		handleAppStart(w, r, app)
+	case "stop":
+		handleAppStop(w, r, app)
+	case "restart":
+		handleAppRestart(w, r, app)
+	case "status":
+		handleAppStatus(w, r, app)
+	case "logs":
+		handleAppLogs(w, r, app)
+	default:
+		http.Error(w, "Unknown action", http.StatusBadRequest)
+	}
+}
+
+func handleAppStart(w http.ResponseWriter, r *http.Request, app *App) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// For now, just update status
+	// In full implementation, this would execute the command and track PID
+	config, _ := loadConfig()
+	for i := range config.Apps {
+		if config.Apps[i].ID == app.ID {
+			config.Apps[i].Status = "running"
+			saveConfig(config)
+			break
+		}
+	}
+
+	auditLogger.LogEvent(AuditEvent{
+		EventType: AuditEventPermissionAdd, // Reuse for now
+		TokenName: r.Header.Get("X-API-Key-Name"),
+		Details:   fmt.Sprintf("Started app: %s", app.ID),
+		Success:   true,
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"status":  "running",
+	})
+}
+
+func handleAppStop(w http.ResponseWriter, r *http.Request, app *App) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	config, _ := loadConfig()
+	for i := range config.Apps {
+		if config.Apps[i].ID == app.ID {
+			config.Apps[i].Status = "stopped"
+			config.Apps[i].PID = 0
+			saveConfig(config)
+			break
+		}
+	}
+
+	auditLogger.LogEvent(AuditEvent{
+		EventType: AuditEventPermissionAdd,
+		TokenName: r.Header.Get("X-API-Key-Name"),
+		Details:   fmt.Sprintf("Stopped app: %s", app.ID),
+		Success:   true,
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"status":  "stopped",
+	})
+}
+
+func handleAppRestart(w http.ResponseWriter, r *http.Request, app *App) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// For now, just update status
+	config, _ := loadConfig()
+	for i := range config.Apps {
+		if config.Apps[i].ID == app.ID {
+			config.Apps[i].Status = "running"
+			saveConfig(config)
+			break
+		}
+	}
+
+	auditLogger.LogEvent(AuditEvent{
+		EventType: AuditEventPermissionAdd,
+		TokenName: r.Header.Get("X-API-Key-Name"),
+		Details:   fmt.Sprintf("Restarted app: %s", app.ID),
+		Success:   true,
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"status":  "running",
+	})
+}
+
+func handleAppStatus(w http.ResponseWriter, r *http.Request, app *App) {
+	if r.Method != "GET" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"id":     app.ID,
+		"name":   app.Name,
+		"status": app.Status,
+		"pid":    app.PID,
+	})
+}
+
+func handleAppLogs(w http.ResponseWriter, r *http.Request, app *App) {
+	if r.Method != "GET" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// For now, return empty logs
+	// In full implementation, this would stream log files
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"app_id": app.ID,
+		"logs":   []string{},
+	})
 }

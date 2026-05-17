@@ -30,7 +30,11 @@ func main() {
 	case "auth":
 		handleAuth()
 	case "api-keys":
-		handleAPIKeys()
+		handleAPIKeysCLI()
+	case "targets":
+		handleTargets()
+	case "deploy":
+		handleDeploy()
 	case "start":
 		handleStart()
 	case "stop":
@@ -106,6 +110,8 @@ func printHelp() {
 	fmt.Println("  remove      Remove an app")
 	fmt.Println("  list        List all apps")
 	fmt.Println("  auth        Authenticate with remote daemon")
+	fmt.Println("  targets     Manage deployment targets")
+	fmt.Println("  deploy      Deploy and manage remote applications")
 	fmt.Println("  api-keys    Manage API keys (remote daemon)")
 	fmt.Println("  start       Start HTTP server (UI)")
 	fmt.Println("  stop        Stop daemon server")
@@ -118,6 +124,19 @@ func printHelp() {
 	fmt.Println("  hotify-cli auth list")
 	fmt.Println("  hotify-cli auth remove --name <name>")
 	fmt.Println("  hotify-cli auth test --name <name>")
+	fmt.Println()
+	fmt.Println("Target Commands:")
+	fmt.Println("  hotify-cli targets --action list")
+	fmt.Println("  hotify-cli targets --action use --name <name>")
+	fmt.Println("  hotify-cli targets --action validate [--name <name>]")
+	fmt.Println("  hotify-cli targets --action remove --name <name>")
+	fmt.Println()
+	fmt.Println("Deploy Commands:")
+	fmt.Println("  hotify-cli deploy --id <id> --source <path> [--target <name>]")
+	fmt.Println("  hotify-cli deploy --id <id> --action start [--target <name>]")
+	fmt.Println("  hotify-cli deploy --id <id> --action stop [--target <name>]")
+	fmt.Println("  hotify-cli deploy --id <id> --action restart [--target <name>]")
+	fmt.Println("  hotify-cli deploy --id <id> --action status [--target <name>]")
 	fmt.Println()
 	fmt.Println("API Key Commands:")
 	fmt.Println("  hotify-cli api-keys add --name <name> [--token <token>] [--permissions <perms>]")
@@ -134,6 +153,10 @@ func printHelp() {
 	fmt.Println("  hotify-cli init")
 	fmt.Println("  hotify-cli add --id myapp --name \"My App\" --domain myapp.example.com --port 3000 --command \"/path/to/app start\"")
 	fmt.Println("  hotify-cli auth --url http://dk1:3060 --token xxx --name dk1")
+	fmt.Println("  hotify-cli targets --action use --name dk1")
+	fmt.Println("  hotify-cli deploy --id myapp --source ./myapp  # Uses default target")
+	fmt.Println("  hotify-cli deploy --id myapp --action start")
+	fmt.Println("  hotify-cli auth test  # Uses default target")
 	fmt.Println("  hotify-cli api-keys add --name \"local-machine\" --permissions \"deploy,start,stop\"")
 	fmt.Println("  hotify-cli list")
 	fmt.Println("  hotify-cli start -daemon")

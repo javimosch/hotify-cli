@@ -226,6 +226,97 @@ hotify-cli stop
 hotify-cli start --daemon
 ```
 
+### Authentication & Security
+
+Hotify includes a comprehensive authentication system for remote daemon access:
+
+#### Bootstrap Token
+When the daemon starts with no API keys, it automatically generates a secure bootstrap token:
+```bash
+hotify-cli start --daemon
+# Check logs for the generated token:
+cat /tmp/hotify-cli.log
+```
+
+The bootstrap token is displayed with clear instructions:
+```
+==============================================
+Initial admin key created successfully!
+Token: <generated-token>
+==============================================
+IMPORTANT: Store this token securely!
+```
+
+#### Authentication Commands
+```bash
+# Authenticate with remote daemon
+hotify-cli auth --action add --url <url> --token <token> --name <name>
+
+# List authenticated remotes
+hotify-cli auth --action list
+
+# Remove remote authentication
+hotify-cli auth --action remove --name <name>
+
+# Test connection to remote
+hotify-cli auth --action test [--name <name>]
+```
+
+#### Target Management
+```bash
+# List all configured targets
+hotify-cli targets --action list
+
+# Set default target
+hotify-cli targets --action use --name <name>
+
+# Validate target connectivity
+hotify-cli targets --action validate [--name <name>]
+
+# Remove target
+hotify-cli targets --action remove --name <name>
+```
+
+#### API Key Management
+```bash
+# Add new API key (local management)
+hotify-cli api-keys --action add --name <name> --permissions <perms>
+
+# List API keys
+hotify-cli api-keys --action list
+
+# Remove API key
+hotify-cli api-keys --action remove --name <name>
+
+# Regenerate token
+hotify-cli api-keys --action regenerate --name <name>
+
+# Update permissions
+hotify-cli api-keys --action permissions --name <name> --add <perms> --remove <perms>
+```
+
+#### API Endpoints
+- **Auth**: `/api/auth/login`, `/api/auth/validate`, `/api/auth/refresh`, `/api/auth/logout`
+- **API Keys**: `/api/api-keys` (GET/POST), `/api/api-keys/{name}` (GET/DELETE/POST)
+- All endpoints require Bearer token authentication
+
+#### Permissions
+- `deploy` - Deploy applications
+- `start` - Start applications
+- `stop` - Stop applications
+- `restart` - Restart applications
+- `logs` - View application logs
+- `config` - Modify configuration
+- `admin` - Full administrative access
+
+#### Security Features
+- AES-256 encryption for tokens at rest
+- Token expiration (configurable, default 30 days)
+- Rate limiting (configurable, default 60 req/min)
+- Failed attempt tracking
+- Audit logging for all security events
+- IP whitelisting support
+
 ### Security Notes
 
 - Cloudflare token stored in plaintext
@@ -233,6 +324,8 @@ hotify-cli start --daemon
 - Use tokens with minimal permissions
 - Consider environment variables for sensitive data
 - Regularly rotate tokens
+- Bootstrap token should be removed after setting up proper API keys
+- Enable HTTPS in production (require_https config option)
 
 ### Limitations
 

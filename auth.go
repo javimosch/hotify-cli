@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"time"
@@ -45,14 +46,12 @@ func (a *AuthClient) Authenticate() error {
 		return fmt.Errorf("error marshaling payload: %v", err)
 	}
 
-	req, err := http.NewRequest("POST", a.BaseURL+"/api/auth/login", nil)
+	req, err := http.NewRequest("POST", a.BaseURL+"/api/auth/login", newRequestBody(data))
 	if err != nil {
 		return fmt.Errorf("error creating request: %v", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+a.AuthToken)
-	req.Body = newRequestBody(data)
 
 	resp, err := a.HTTPClient.Do(req)
 	if err != nil {
@@ -180,7 +179,7 @@ type requestBody struct {
 
 func (r *requestBody) Read(p []byte) (n int, err error) {
 	if r.pos >= len(r.data) {
-		return 0, nil
+		return 0, io.EOF
 	}
 	n = copy(p, r.data[r.pos:])
 	r.pos += n
@@ -197,6 +196,7 @@ func handleAuth() {
 	url := authCmd.String("url", "", "Remote daemon URL")
 	token := authCmd.String("token", "", "Authentication token")
 	name := authCmd.String("name", "", "Remote name")
+	target := authCmd.String("target", "", "Target name (uses default if not specified)")
 	action := authCmd.String("action", "add", "Action: add, remove, list, test")
 	authCmd.Parse(os.Args[2:])
 
@@ -208,7 +208,12 @@ func handleAuth() {
 	case "list":
 		handleAuthList()
 	case "test":
-		handleAuthTest(*name)
+		// Use --target if specified, otherwise use --name
+		if *target != "" {
+			handleAuthTest(*target)
+		} else {
+			handleAuthTest(*name)
+		}
 	default:
 		fmt.Println("Unknown action:", *action)
 		fmt.Println("Valid actions: add, remove, list, test")
@@ -346,10 +351,16 @@ func handleAuthList() {
 }
 
 func handleAuthTest(name string) {
+	// If no name specified, use default target
 	if name == "" {
-		fmt.Println("Missing required flag: --name")
-		fmt.Println("Usage: hotify-cli auth test --name <name>")
-		os.Exit(1)
+		target, err := getActiveTarget("")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			fmt.Println("Usage: hotify-cli auth test --name <name>")
+			fmt.Println("   or: hotify-cli targets --action use --name <name>")
+			os.Exit(1)
+		}
+		name = target.Name
 	}
 
 	config, err := loadConfig()

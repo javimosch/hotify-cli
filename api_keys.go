@@ -21,7 +21,8 @@ type APIKey struct {
 
 // APIKeyManager manages API keys
 type APIKeyManager struct {
-	keys       map[string]*APIKey
+	keys       map[string]*APIKey  // name -> key
+	keysByToken map[string]*APIKey  // token -> key
 	permMgr    *PermissionManager
 	audit      *AuditLogger
 	security   *SecurityManager
@@ -43,10 +44,11 @@ func NewAPIKeyManager() (*APIKeyManager, error) {
 	audit.LoadEventsFromDisk()
 
 	return &APIKeyManager{
-		keys:    make(map[string]*APIKey),
-		permMgr: NewPermissionManager(),
-		audit:   audit,
-		security: security,
+		keys:       make(map[string]*APIKey),
+		keysByToken: make(map[string]*APIKey),
+		permMgr:    NewPermissionManager(),
+		audit:      audit,
+		security:   security,
 	}, nil
 }
 
@@ -103,7 +105,8 @@ func (a *APIKeyManager) AddKey(name string, permissions []Permission, token stri
 	}
 
 	a.keys[name] = key
-	a.permMgr.apiKeys = a.keys
+	a.keysByToken[key.Token] = key
+	a.permMgr.apiKeys = a.keysByToken
 
 	// Log event
 	a.audit.LogEvent(AuditEvent{
@@ -124,6 +127,7 @@ func (a *APIKeyManager) RemoveKey(name string) error {
 	}
 
 	delete(a.keys, name)
+	delete(a.keysByToken, key.Token)
 	delete(a.permMgr.apiKeys, key.Token)
 
 	// Log event
@@ -155,7 +159,9 @@ func (a *APIKeyManager) RegenerateKey(name string) (*APIKey, error) {
 	key.Token = newToken
 	key.LastUsed = time.Now()
 
-	// Update permission manager
+	// Update maps
+	delete(a.keysByToken, oldToken)
+	a.keysByToken[newToken] = key
 	delete(a.permMgr.apiKeys, oldToken)
 	a.permMgr.apiKeys[newToken] = key
 
@@ -299,8 +305,8 @@ func (a *APIKeyManager) GetKeyUsage(name string) (map[string]interface{}, error)
 	}, nil
 }
 
-// handleAPIKeys handles the api-keys CLI command
-func handleAPIKeys() {
+// handleAPIKeysCLI handles the api-keys CLI command
+func handleAPIKeysCLI() {
 	apiKeysCmd := flag.NewFlagSet("api-keys", flag.ExitOnError)
 	action := apiKeysCmd.String("action", "list", "Action: add, list, remove, regenerate, permissions, usage")
 	name := apiKeysCmd.String("name", "", "API key name")
