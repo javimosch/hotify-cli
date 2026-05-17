@@ -25,6 +25,7 @@ type Config struct {
 type Remote struct {
 	Name         string   `json:"name"`
 	URL          string   `json:"url"`
+	SSHHost      string   `json:"ssh_host,omitempty"`
 	AuthToken    string   `json:"auth_token"`
 	Permissions  []string `json:"permissions"`
 	Default      bool     `json:"default"`

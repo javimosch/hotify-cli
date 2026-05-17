@@ -233,6 +233,68 @@ func (h *HTTPClient) Post(path string, payload map[string]interface{}) error {
 	return nil
 }
 
+// OutputFormat controls command output format
+type OutputFormat string
+
+const (
+	OutputFormatText OutputFormat = "text"
+	OutputFormatJSON OutputFormat = "json"
+)
+
+// CommandResult represents a structured command result
+type CommandResult struct {
+	Version  string                 `json:"version"`
+	Success  bool                   `json:"success"`
+	Data     map[string]interface{} `json:"data,omitempty"`
+	Error    *CommandError          `json:"error,omitempty"`
+	Metadata map[string]interface{} `json:"metadata,omitempty"`
+}
+
+// CommandError represents a structured error
+type CommandError struct {
+	Code        int      `json:"code"`
+	Type        string   `json:"type"`
+	Message     string   `json:"message"`
+	Details     map[string]interface{} `json:"details,omitempty"`
+	Recoverable bool     `json:"recoverable"`
+	RetryAfter  *int     `json:"retry_after,omitempty"`
+	Suggestions []string `json:"suggestions,omitempty"`
+}
+
+// Exit codes
+const (
+	ExitSuccess                = 0
+	ExitGenericFailure         = 1
+	ExitTraefikNotInstalled    = 90
+	ExitTraefikAlreadyInstalled = 91
+	ExitTraefikInstallFailed   = 92
+	ExitTraefikServiceFailed   = 93
+	ExitTraefikConfigInvalid   = 94
+	ExitPermissionsError       = 95
+	ExitTargetNotFound        = 96
+	ExitInvalidArgument       = 97
+	ExitConnectionTimeout     = 105
+)
+
+// printOutput prints command result in the specified format
+func printOutput(result CommandResult, format OutputFormat) {
+	if format == OutputFormatJSON {
+		json.NewEncoder(os.Stdout).Encode(result)
+	} else {
+		if result.Success {
+			fmt.Println("✅ Success")
+			for key, value := range result.Data {
+				fmt.Printf("%s: %v\n", key, value)
+			}
+		} else {
+			fmt.Fprintf(os.Stderr, "❌ Error: %s\n", result.Error.Message)
+			for _, suggestion := range result.Error.Suggestions {
+				fmt.Fprintf(os.Stderr, "  → %s\n", suggestion)
+			}
+		}
+	}
+}
+
 func (h *HTTPClient) Get(path string) (map[string]interface{}, error) {
 	req, err := http.NewRequest("GET", h.BaseURL+path, nil)
 	if err != nil {

@@ -179,9 +179,16 @@ Hotify uses Cloudflare API to:
 
 - Cloudflare API token with DNS edit permissions
 - Domain managed in Cloudflare
-- Traefik installed on target server
 - Server with systemd support
-- App binary deployed to server
+- SSH access to target server (for Traefik system management)
+- App binary or folder ready for deployment
+- Target configured with SSH host for system management
+
+**Agent-Friendly Features:**
+- All commands support `--json` flag for machine-readable output
+- Semantic exit codes for programmatic decision making
+- Idempotent operations (safe to run multiple times)
+- Non-interactive execution suitable for automation
 
 ### Troubleshooting
 
@@ -277,6 +284,138 @@ hotify-cli targets --action validate [--name <name>]
 hotify-cli targets --action remove --name <name>
 ```
 
+#### Traefik System Management
+Hotify can automatically set up Traefik on bare VMs with idempotent installation:
+
+```bash
+# Check Traefik installation status (JSON output for agent consumption)
+hotify-cli traefik-system --status --json
+
+# Install Traefik (idempotent - skips if already installed)
+hotify-cli traefik-system --json
+
+# Force reinstall Traefik
+hotify-cli traefik-system --force --json
+
+# Remove Traefik installation
+hotify-cli traefik-system --remove --json
+```
+
+**Agent Workflow for Traefik Setup:**
+
+When deploying to a target that may not have Traefik installed:
+
+```bash
+# 1. Check if Traefik is installed
+hotify-cli traefik-system --status --json
+
+# 2. If not installed (exit code 90), install it
+hotify-cli traefik-system --json
+
+# 3. Proceed with app deployment
+hotify-cli deploy --id myapp --source ./myapp
+```
+
+**Exit Codes for Agent Decision Making:**
+- `0` - Success
+- `90` - Traefik not installed (agent should run install command)
+- `91` - Traefik already installed (use --force to reinstall)
+- `92` - Traefik installation failed
+- `93` - Traefik service failed
+- `94` - Traefik configuration invalid
+- `95` - Permissions error
+- `96` - Target not found
+
+**JSON Output Structure:**
+```json
+{
+  "version": "1.0",
+  "success": true,
+  "data": {
+    "status": {
+      "installed": true,
+      "version": "Version:      2.9.0",
+      "status": "active",
+      "binary_path": "/usr/local/bin/traefik",
+      "config_dir": "/etc/traefik",
+      "service_name": "traefik.service",
+      "systemd_enabled": true
+    },
+    "actions_taken": ["installed_binary", "created_config_dir", "setup_systemd_service", "started_service"]
+  },
+  "error": {
+    "code": 91,
+    "type": "traefik_already_installed",
+    "message": "Traefik is already installed",
+    "recoverable": true,
+    "suggestions": ["Use --force to reinstall", "Use --status to check current installation"]
+  }
+}
+```
+
+**Target Configuration for Traefik Setup:**
+
+Targets must include SSH access for system management:
+
+```json
+{
+  "name": "production",
+  "url": "http://192.168.1.100:3060",
+  "ssh_host": "user@192.168.1.100",
+  "auth_token": "encrypted_token",
+  "permissions": ["deploy", "start", "stop"],
+  "default": true
+}
+```
+
+#### Deployment System
+Hotify includes a full deployment system supporting both binary and folder-based applications:
+
+```bash
+# Deploy single binary
+hotify-cli deploy --id myapp --source ./myapp-binary --json
+
+# Deploy folder (Node.js/Bun/Python apps)
+hotify-cli deploy --id myapp --source ./myapp-folder --json
+
+# Start deployed application
+hotify-cli deploy --id myapp --action start --json
+
+# Stop deployed application
+hotify-cli deploy --id myapp --action stop --json
+
+# Restart deployed application
+hotify-cli deploy --id myapp --action restart --json
+
+# Check application status
+hotify-cli deploy --id myapp --action status --json
+```
+
+**Deployment Features:**
+- Supports single binary files (Go, Rust, etc.)
+- Supports folder deployment with automatic tar/gzip compression (Node.js, Bun, Python)
+- Automatic deployment type detection (file vs folder)
+- Target-aware deployment (uses configured targets)
+- API-based deployment with authentication
+- Source validation and cleanup
+
+**Agent Deployment Workflow:**
+```bash
+# 1. Ensure Traefik is installed
+hotify-cli traefik-system --status --json
+# If exit code 90, install it:
+hotify-cli traefik-system --json
+
+# 2. Deploy application (binary or folder)
+hotify-cli deploy --id myapp --source ./myapp --json
+
+# 3. Start the application
+hotify-cli deploy --id myapp --action start --json
+
+# 4. Verify status
+hotify-cli deploy --id myapp --action status --json
+```
+
 #### API Key Management
 ```bash
 # Add new API key (local management)
@@ -331,10 +470,10 @@ hotify-cli api-keys --action permissions --name <name> --add <perms> --remove <p
 
 - Single server deployment
 - Requires specific app architecture
-- No built-in app deployment
-- No process management
+- No built-in app deployment (manual binary deployment required)
+- No process management (Phase 3 - future)
 - Cloudflare DNS only
-- Traefik must be pre-installed
+- Requires SSH access for Traefik system management
 
 ### Best Practices
 
