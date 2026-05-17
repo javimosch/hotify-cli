@@ -393,12 +393,14 @@ func (t *TraefikSystemManager) runCommand(cmd string) (string, error) {
 // handleTraefikSystem handles the Traefik system management CLI command
 func handleTraefikSystem() {
 	traefikCmd := flag.NewFlagSet("traefik-system", flag.ExitOnError)
-	jsonOutput := traefikCmd.Bool("json", false, "Output in JSON format")
 	targetName := traefikCmd.String("target", "", "Target name (uses default if not specified)")
 	removeFlag := traefikCmd.Bool("remove", false, "Remove Traefik installation")
 	statusFlag := traefikCmd.Bool("status", false, "Check Traefik installation status")
 	forceFlag := traefikCmd.Bool("force", false, "Force reinstallation")
-	traefikCmd.Parse(os.Args[2:])
+	
+	// Filter out --human flag before parsing
+	filteredArgs := filterHumanFlag(os.Args[2:])
+	traefikCmd.Parse(filteredArgs)
 
 	// Get target
 	target, err := getActiveTarget(*targetName)
@@ -421,11 +423,8 @@ func handleTraefikSystem() {
 		os.Exit(ExitTargetNotFound)
 	}
 
-	// Determine output format
-	format := OutputFormatText
-	if *jsonOutput {
-		format = OutputFormatJSON
-	}
+	// Determine output format (JSON by default, --human for text)
+	format := getOutputFormat()
 
 	manager := NewTraefikSystemManager(target)
 

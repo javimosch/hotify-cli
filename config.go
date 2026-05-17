@@ -6,12 +6,90 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 const (
 	configDir  = ".hotify"
 	configFile = "config.json"
 )
+
+// OutputFormat controls command output format
+type OutputFormat string
+
+const (
+	OutputFormatText OutputFormat = "text"
+	OutputFormatJSON OutputFormat = "json"
+)
+
+// getOutputFormat determines the output format based on command-line flags
+func getOutputFormat() OutputFormat {
+	args := os.Args[2:]
+	for _, arg := range args {
+		if arg == "--human" || strings.HasPrefix(arg, "--human=") {
+			return OutputFormatText
+		}
+	}
+	return OutputFormatJSON // JSON by default
+}
+
+// filterHumanFlag removes --human flag from args to avoid flag parsing conflicts
+func filterHumanFlag(args []string) []string {
+	filtered := []string{}
+	for _, arg := range args {
+		if arg != "--human" && !strings.HasPrefix(arg, "--human=") {
+			filtered = append(filtered, arg)
+		}
+	}
+	return filtered
+}
+
+// CommandResult represents a structured command result
+type CommandResult struct {
+	Version  string                 `json:"version"`
+	Success  bool                   `json:"success"`
+	Data     map[string]interface{} `json:"data,omitempty"`
+	Error    *CommandError          `json:"error,omitempty"`
+	Metadata map[string]interface{} `json:"metadata,omitempty"`
+}
+
+// CommandError represents a structured error
+type CommandError struct {
+	Code        int      `json:"code"`
+	Type        string   `json:"type"`
+	Message     string   `json:"message"`
+	Details     map[string]interface{} `json:"details,omitempty"`
+	Recoverable bool     `json:"recoverable"`
+	RetryAfter  *int     `json:"retry_after,omitempty"`
+	Suggestions []string `json:"suggestions,omitempty"`
+}
+
+// Exit codes
+const (
+	ExitSuccess                = 0
+	ExitGenericFailure         = 1
+	ExitInvalidArgument       = 97
+	ExitConfigError           = 98
+)
+
+// printOutput prints command result in the specified format
+func printOutput(result CommandResult, format OutputFormat) {
+	if format == OutputFormatJSON {
+		json.NewEncoder(os.Stdout).Encode(result)
+	} else {
+		if result.Success {
+			fmt.Println("✅ Success")
+			for key, value := range result.Data {
+				fmt.Printf("%s: %v\n", key, value)
+			}
+		} else {
+			fmt.Fprintf(os.Stderr, "❌ Error: %s\n", result.Error.Message)
+			for _, suggestion := range result.Error.Suggestions {
+				fmt.Fprintf(os.Stderr, "  → %s\n", suggestion)
+			}
+		}
+	}
+}
 
 type Config struct {
 	CloudflareToken string        `json:"cloudflare_token"`
@@ -175,12 +253,6 @@ func addApp() {
 		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
 		os.Exit(1)
 	}
-
-	// Skip Cloudflare check for deployment-only use
-	// if config.CloudflareToken == "" || config.Domain == "" || config.AdminEmail == "" {
-	// 	fmt.Println("Please run 'hotify-cli init' first to set up configuration")
-	// 	os.Exit(1)
-	// }
 
 	// Parse flags
 	addCmd := flag.NewFlagSet("add", flag.ExitOnError)

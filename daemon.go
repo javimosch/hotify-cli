@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"syscall"
+	"time"
 )
 
 const (
@@ -12,18 +13,47 @@ const (
 	logFile = "/tmp/hotify-cli.log"
 )
 
+// Exit codes for daemon operations
+const (
+	ExitDaemonError = 99
+)
+
 func startDaemon(port int) {
+	format := getOutputFormat()
+
 	// Check if already running
 	if isDaemonRunning() {
-		fmt.Println("Daemon is already running")
-		return
+		result := CommandResult{
+			Version: Version,
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitDaemonError,
+				Type:        "daemon_error",
+				Message:     "Daemon is already running",
+				Recoverable: false,
+				Suggestions: []string{"Check daemon status with: hotify-cli status", "Stop daemon with: hotify-cli stop"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitDaemonError)
 	}
 
 	// Get the current executable path
 	execPath, err := os.Executable()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error getting executable path: %v\n", err)
-		os.Exit(1)
+		result := CommandResult{
+			Version: Version,
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitDaemonError,
+				Type:        "daemon_error",
+				Message:     fmt.Sprintf("Error getting executable path: %v", err),
+				Recoverable: false,
+				Suggestions: []string{"Check executable permissions", "Verify hotify-cli is properly installed"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitDaemonError)
 	}
 
 	// Create command to run server in foreground
@@ -32,8 +62,19 @@ func startDaemon(port int) {
 	// Set up logging
 	logFileHandle, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error opening log file: %v\n", err)
-		os.Exit(1)
+		result := CommandResult{
+			Version: Version,
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitDaemonError,
+				Type:        "daemon_error",
+				Message:     fmt.Sprintf("Error opening log file: %v", err),
+				Recoverable: false,
+				Suggestions: []string{"Check log file permissions", "Ensure /tmp directory is writable"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitDaemonError)
 	}
 	defer logFileHandle.Close()
 
@@ -42,32 +83,90 @@ func startDaemon(port int) {
 
 	// Start the process
 	if err := cmd.Start(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error starting daemon: %v\n", err)
-		os.Exit(1)
+		result := CommandResult{
+			Version: Version,
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitDaemonError,
+				Type:        "daemon_error",
+				Message:     fmt.Sprintf("Error starting daemon: %v", err),
+				Recoverable: false,
+				Suggestions: []string{"Check port availability", "Verify system resources"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitDaemonError)
 	}
 
 	// Write PID file
 	pid := cmd.Process.Pid
 	if err := os.WriteFile(pidFile, []byte(fmt.Sprintf("%d", pid)), 0644); err != nil {
-		fmt.Fprintf(os.Stderr, "Error writing PID file: %v\n", err)
+		result := CommandResult{
+			Version: Version,
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitDaemonError,
+				Type:        "daemon_error",
+				Message:     fmt.Sprintf("Error writing PID file: %v", err),
+				Recoverable: false,
+				Suggestions: []string{"Check /tmp directory permissions", "Ensure PID file location is writable"},
+			},
+		}
+		printOutput(result, format)
 		cmd.Process.Kill()
-		os.Exit(1)
+		os.Exit(ExitDaemonError)
 	}
 
-	fmt.Printf("Daemon started with PID %d\n", pid)
-	fmt.Printf("Logs: %s\n", logFile)
+	result := CommandResult{
+		Version: Version,
+		Success: true,
+		Data: map[string]interface{}{
+			"pid":      pid,
+			"log_file": logFile,
+			"port":     port,
+			"status":   "started",
+		},
+		Metadata: map[string]interface{}{
+			"timestamp": time.Now().Unix(),
+		},
+	}
+	printOutput(result, format)
 }
 
 func stopDaemon() {
+	format := getOutputFormat()
+
 	// Read PID file
 	pidData, err := os.ReadFile(pidFile)
 	if err != nil {
 		if os.IsNotExist(err) {
-			fmt.Println("Daemon is not running")
-			return
+			result := CommandResult{
+				Version: Version,
+				Success: false,
+				Error: &CommandError{
+					Code:        ExitDaemonError,
+					Type:        "daemon_error",
+					Message:     "Daemon is not running",
+					Recoverable: false,
+					Suggestions: []string{"Start daemon with: hotify-cli start --daemon"},
+				},
+			}
+			printOutput(result, format)
+			os.Exit(ExitDaemonError)
 		}
-		fmt.Fprintf(os.Stderr, "Error reading PID file: %v\n", err)
-		os.Exit(1)
+		result := CommandResult{
+			Version: Version,
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitDaemonError,
+				Type:        "daemon_error",
+				Message:     fmt.Sprintf("Error reading PID file: %v", err),
+				Recoverable: false,
+				Suggestions: []string{"Check PID file permissions", "Verify /tmp directory is accessible"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitDaemonError)
 	}
 
 	var pid int
@@ -76,28 +175,87 @@ func stopDaemon() {
 	// Send SIGTERM to the process
 	process, err := os.FindProcess(pid)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error finding process: %v\n", err)
-		os.Exit(1)
+		result := CommandResult{
+			Version: Version,
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitDaemonError,
+				Type:        "daemon_error",
+				Message:     fmt.Sprintf("Error finding process: %v", err),
+				Recoverable: false,
+				Suggestions: []string{"Check if process is still running", "Verify PID is correct"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitDaemonError)
 	}
 
 	if err := process.Signal(syscall.SIGTERM); err != nil {
-		fmt.Fprintf(os.Stderr, "Error stopping process: %v\n", err)
-		os.Exit(1)
+		result := CommandResult{
+			Version: Version,
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitDaemonError,
+				Type:        "daemon_error",
+				Message:     fmt.Sprintf("Error stopping process: %v", err),
+				Recoverable: false,
+				Suggestions: []string{"Check process permissions", "Verify process is still running"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitDaemonError)
 	}
 
 	// Remove PID file
 	os.Remove(pidFile)
 
-	fmt.Printf("Daemon stopped (PID %d)\n", pid)
+	result := CommandResult{
+		Version: Version,
+		Success: true,
+		Data: map[string]interface{}{
+			"pid":    pid,
+			"status": "stopped",
+		},
+		Metadata: map[string]interface{}{
+			"timestamp": time.Now().Unix(),
+		},
+	}
+	printOutput(result, format)
 }
 
 func checkDaemonStatus() {
+	format := getOutputFormat()
+
 	if isDaemonRunning() {
 		pidData, _ := os.ReadFile(pidFile)
-		fmt.Printf("Daemon is running (PID %s)\n", string(pidData))
-		fmt.Printf("Logs: %s\n", logFile)
+		var pid int
+		fmt.Sscanf(string(pidData), "%d", &pid)
+
+		result := CommandResult{
+			Version: Version,
+			Success: true,
+			Data: map[string]interface{}{
+				"pid":      pid,
+				"log_file": logFile,
+				"status":   "running",
+			},
+			Metadata: map[string]interface{}{
+				"timestamp": time.Now().Unix(),
+			},
+		}
+		printOutput(result, format)
 	} else {
-		fmt.Println("Daemon is not running")
+		result := CommandResult{
+			Version: Version,
+			Success: true,
+			Data: map[string]interface{}{
+				"status": "not_running",
+			},
+			Metadata: map[string]interface{}{
+				"timestamp": time.Now().Unix(),
+			},
+		}
+		printOutput(result, format)
 	}
 }
 

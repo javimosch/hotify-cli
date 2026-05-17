@@ -185,10 +185,87 @@ Hotify uses Cloudflare API to:
 - Target configured with SSH host for system management
 
 **Agent-Friendly Features:**
-- All commands support `--json` flag for machine-readable output
+- **JSON output by default** - all commands output structured JSON for machine readability
+- Add `--human` flag for human-readable text output when needed
 - Semantic exit codes for programmatic decision making
 - Idempotent operations (safe to run multiple times)
 - Non-interactive execution suitable for automation
+- Structured error messages with suggestions for recovery
+
+### JSON Output Support
+
+**JSON is the default output format** for all agent-friendly commands. Add `--human` flag for human-readable text output.
+
+The following commands support JSON output:
+
+#### Fully Supported Commands (JSON by default)
+- **Authentication**: `hotify-cli auth --action <action>` (JSON by default, add `--human` for text)
+- **API Keys**: `hotify-cli api-keys --action <action>` (JSON by default, add `--human` for text)
+- **Targets**: `hotify-cli targets --action <action>` (JSON by default, add `--human` for text)
+- **Deployment**: `hotify-cli deploy --id <id> --action <action>` (JSON by default, add `--human` for text)
+- **Traefik System**: `hotify-cli traefik-system [--status|--remove|--force]` (JSON by default, add `--human` for text)
+- **Daemon Management**: `hotify-cli start --daemon`, `hotify-cli stop`, `hotify-cli status` (JSON by default, add `--human` for text)
+
+#### Interactive Commands (JSON Not Supported)
+- **init**: Interactive setup requiring user input
+- **add/edit/remove/list**: Text-only output (flag parsing limitations)
+
+#### JSON Output Structure
+All JSON responses follow this consistent structure:
+```json
+{
+  "version": "1.0.0",
+  "success": true|false,
+  "data": {
+    // Command-specific data
+  },
+  "error": {
+    "code": <exit_code>,
+    "type": "<error_type>",
+    "message": "<error_message>",
+    "recoverable": true|false,
+    "suggestions": ["<suggestion1>", "<suggestion2>"]
+  },
+  "metadata": {
+    "timestamp": <unix_timestamp>
+  }
+}
+```
+
+#### Semantic Exit Codes
+- `0` - Success
+- `1` - Generic failure
+- `90` - Traefik not installed
+- `91` - Traefik already installed
+- `92` - Traefik installation failed
+- `93` - Traefik service failed
+- `94` - Traefik configuration invalid
+- `95` - Permissions error
+- `96` - Target not found
+- `97` - Invalid argument
+- `98` - Configuration error
+- `99` - Daemon error
+- `105` - Connection timeout
+
+#### Example JSON Usage
+```bash
+# Check daemon status (JSON by default)
+hotify-cli status
+# Response: {"version":"1.0.0","success":true,"data":{"status":"not_running"},"metadata":{"timestamp":1778999882}}
+
+# Get human-readable output
+hotify-cli status --human
+# Response: ✅ Success
+#          status: not_running
+
+# Check Traefik installation status (JSON by default)
+hotify-cli traefik-system --status
+# Response: {"version":"1.0.0","success":true,"data":{"status":{"installed":true,...}}}
+
+# Deploy application (JSON by default)
+hotify-cli deploy --id myapp --source ./myapp
+# Response: {"version":"1.0.0","success":true,"data":{"app_id":"myapp","deployment_type":"binary",...}}
+```
 
 ### Troubleshooting
 

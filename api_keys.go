@@ -305,6 +305,19 @@ func (a *APIKeyManager) GetKeyUsage(name string) (map[string]interface{}, error)
 	}, nil
 }
 
+// keyToMap converts an API key to a map for JSON output
+func keyToMap(key *APIKey) (map[string]interface{}, error) {
+	return map[string]interface{}{
+		"name":            key.Name,
+		"permissions":     key.Permissions,
+		"created_at":      key.CreatedAt.Format(time.RFC3339),
+		"last_used":       key.LastUsed.Format(time.RFC3339),
+		"request_count":   key.RequestCount,
+		"failed_attempts": key.FailedAttempts,
+		"expires_at":      key.ExpiresAt.Format(time.RFC3339),
+	}, nil
+}
+
 // handleAPIKeysCLI handles the api-keys CLI command
 func handleAPIKeysCLI() {
 	apiKeysCmd := flag.NewFlagSet("api-keys", flag.ExitOnError)
@@ -314,33 +327,59 @@ func handleAPIKeysCLI() {
 	permissions := apiKeysCmd.String("permissions", "", "Comma-separated permissions")
 	addPerms := apiKeysCmd.String("add", "", "Permissions to add")
 	removePerms := apiKeysCmd.String("remove", "", "Permissions to remove")
-	apiKeysCmd.Parse(os.Args[2:])
+	
+	// Filter out --human flag before parsing
+	filteredArgs := filterHumanFlag(os.Args[2:])
+	apiKeysCmd.Parse(filteredArgs)
+
+	// Determine output format (JSON by default, --human for text)
+	format := getOutputFormat()
 
 	switch *action {
 	case "add":
-		handleAPIKeyAdd(*name, *token, *permissions)
+		handleAPIKeyAdd(*name, *token, *permissions, format)
 	case "list":
-		handleAPIKeyList()
+		handleAPIKeyList(format)
 	case "remove":
-		handleAPIKeyRemove(*name)
+		handleAPIKeyRemove(*name, format)
 	case "regenerate":
-		handleAPIKeyRegenerate(*name)
+		handleAPIKeyRegenerate(*name, format)
 	case "permissions":
-		handleAPIKeyPermissions(*name, *addPerms, *removePerms)
+		handleAPIKeyPermissions(*name, *addPerms, *removePerms, format)
 	case "usage":
-		handleAPIKeyUsage(*name)
+		handleAPIKeyUsage(*name, format)
 	default:
-		fmt.Println("Unknown action:", *action)
-		fmt.Println("Valid actions: add, list, remove, regenerate, permissions, usage")
-		os.Exit(1)
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitInvalidArgument,
+				Type:        "invalid_argument",
+				Message:     fmt.Sprintf("Unknown action: %s", *action),
+				Recoverable: false,
+				Suggestions: []string{"Valid actions: add, list, remove, regenerate, permissions, usage"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitInvalidArgument)
 	}
 }
 
-func handleAPIKeyAdd(name, token, permissions string) {
+func handleAPIKeyAdd(name, token, permissions string, format OutputFormat) {
 	if name == "" {
-		fmt.Println("Missing required flag: --name")
-		fmt.Println("Usage: hotify-cli api-keys add --name <name> [--token <token>] [--permissions <permissions>]")
-		os.Exit(1)
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitInvalidArgument,
+				Type:        "missing_required_flags",
+				Message:     "Missing required flag: --name",
+				Recoverable: false,
+				Suggestions: []string{"Usage: hotify-cli api-keys --action add --name <name> [--token <token>] [--permissions <permissions>]"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitInvalidArgument)
 	}
 
 	// Parse permissions
@@ -349,8 +388,19 @@ func handleAPIKeyAdd(name, token, permissions string) {
 	if permissions != "" {
 		perms, err = ParsePermissions(permissions)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error parsing permissions: %v\n", err)
-			os.Exit(1)
+			result := CommandResult{
+				Version: "1.0",
+				Success: false,
+				Error: &CommandError{
+					Code:        ExitInvalidArgument,
+					Type:        "invalid_permissions",
+					Message:     fmt.Sprintf("Error parsing permissions: %v", err),
+					Recoverable: false,
+					Suggestions: []string{"Valid permissions: deploy, start, stop, logs, config, admin"},
+				},
+			}
+			printOutput(result, format)
+			os.Exit(ExitInvalidArgument)
 		}
 	} else {
 		// Default permissions
@@ -365,111 +415,246 @@ func handleAPIKeyAdd(name, token, permissions string) {
 
 	manager, err := NewAPIKeyManager()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating API key manager: %v\n", err)
-		os.Exit(1)
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitGenericFailure,
+				Type:        "manager_creation_failed",
+				Message:     fmt.Sprintf("Error creating API key manager: %v", err),
+				Recoverable: false,
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitGenericFailure)
 	}
 
 	key, err := manager.AddKey(name, perms, tokenValue)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error adding API key: %v\n", err)
-		os.Exit(1)
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitGenericFailure,
+				Type:        "key_creation_failed",
+				Message:     fmt.Sprintf("Error adding API key: %v", err),
+				Recoverable: false,
+				Suggestions: []string{"Check if key name already exists", "Verify permissions are valid"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitGenericFailure)
 	}
 
-	fmt.Printf("✅ API key created: %s\n", key.Name)
-	fmt.Printf("Token: %s\n", key.Token)
-	fmt.Printf("Permissions: %v\n", key.Permissions)
-	if !key.ExpiresAt.IsZero() {
-		fmt.Printf("Expires: %s\n", key.ExpiresAt.Format(time.RFC3339))
+	keyData, _ := keyToMap(key)
+	result := CommandResult{
+		Version: "1.0",
+		Success: true,
+		Data: map[string]interface{}{
+			"key": keyData,
+		},
+		Metadata: map[string]interface{}{
+			"action": "created",
+			"warning": "Store this token securely. It will not be shown again.",
+		},
 	}
-	fmt.Println("\nIMPORTANT: Store this token securely. It will not be shown again.")
+	printOutput(result, format)
 }
 
-func handleAPIKeyList() {
+func handleAPIKeyList(format OutputFormat) {
 	manager, err := NewAPIKeyManager()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating API key manager: %v\n", err)
-		os.Exit(1)
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitGenericFailure,
+				Type:        "manager_creation_failed",
+				Message:     fmt.Sprintf("Error creating API key manager: %v", err),
+				Recoverable: false,
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitGenericFailure)
 	}
 
 	keys := manager.ListKeys()
-	if len(keys) == 0 {
-		fmt.Println("No API keys configured")
-		return
+	
+	keysData := []map[string]interface{}{}
+	for _, key := range keys {
+		keyData, _ := keyToMap(key)
+		keysData = append(keysData, keyData)
 	}
 
-	fmt.Println("API Keys:")
-	fmt.Println("=========")
-	for _, key := range keys {
-		fmt.Printf("Name: %s\n", key.Name)
-		fmt.Printf("Token: %s\n", maskToken(key.Token))
-		fmt.Printf("Permissions: %v\n", key.Permissions)
-		fmt.Printf("Created: %s\n", key.CreatedAt.Format(time.RFC3339))
-		if !key.ExpiresAt.IsZero() {
-			fmt.Printf("Expires: %s\n", key.ExpiresAt.Format(time.RFC3339))
-		}
-		fmt.Printf("Last Used: %s\n", key.LastUsed.Format(time.RFC3339))
-		fmt.Printf("Requests: %d\n", key.RequestCount)
-		fmt.Printf("Failed Attempts: %d\n", key.FailedAttempts)
-		fmt.Println()
+	result := CommandResult{
+		Version: "1.0",
+		Success: true,
+		Data: map[string]interface{}{
+			"keys":  keysData,
+			"count": len(keysData),
+		},
 	}
+	printOutput(result, format)
 }
 
-func handleAPIKeyRemove(name string) {
+func handleAPIKeyRemove(name string, format OutputFormat) {
 	if name == "" {
-		fmt.Println("Missing required flag: --name")
-		fmt.Println("Usage: hotify-cli api-keys remove --name <name>")
-		os.Exit(1)
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitInvalidArgument,
+				Type:        "missing_required_flags",
+				Message:     "Missing required flag: --name",
+				Recoverable: false,
+				Suggestions: []string{"Usage: hotify-cli api-keys --action remove --name <name>"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitInvalidArgument)
 	}
 
 	manager, err := NewAPIKeyManager()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating API key manager: %v\n", err)
-		os.Exit(1)
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitGenericFailure,
+				Type:        "manager_creation_failed",
+				Message:     fmt.Sprintf("Error creating API key manager: %v", err),
+				Recoverable: false,
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitGenericFailure)
 	}
 
 	if err := manager.RemoveKey(name); err != nil {
-		fmt.Fprintf(os.Stderr, "Error removing API key: %v\n", err)
-		os.Exit(1)
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitTargetNotFound,
+				Type:        "key_not_found",
+				Message:     fmt.Sprintf("Error removing API key: %v", err),
+				Recoverable: false,
+				Suggestions: []string{"List available keys: hotify-cli api-keys --action list"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitTargetNotFound)
 	}
 
-	fmt.Printf("✅ API key removed: %s\n", name)
+	result := CommandResult{
+		Version: "1.0",
+		Success: true,
+		Data: map[string]interface{}{
+			"removed_key": name,
+		},
+		Metadata: map[string]interface{}{
+			"action": "removed",
+		},
+	}
+	printOutput(result, format)
 }
 
-func handleAPIKeyRegenerate(name string) {
+func handleAPIKeyRegenerate(name string, format OutputFormat) {
 	if name == "" {
-		fmt.Println("Missing required flag: --name")
-		fmt.Println("Usage: hotify-cli api-keys regenerate --name <name>")
-		os.Exit(1)
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitInvalidArgument,
+				Type:        "missing_required_flags",
+				Message:     "Missing required flag: --name",
+				Recoverable: false,
+				Suggestions: []string{"Usage: hotify-cli api-keys --action regenerate --name <name>"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitInvalidArgument)
 	}
 
 	manager, err := NewAPIKeyManager()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating API key manager: %v\n", err)
-		os.Exit(1)
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitGenericFailure,
+				Type:        "manager_creation_failed",
+				Message:     fmt.Sprintf("Error creating API key manager: %v", err),
+				Recoverable: false,
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitGenericFailure)
 	}
 
 	key, err := manager.RegenerateKey(name)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error regenerating API key: %v\n", err)
-		os.Exit(1)
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitTargetNotFound,
+				Type:        "key_not_found",
+				Message:     fmt.Sprintf("Error regenerating API key: %v", err),
+				Recoverable: false,
+				Suggestions: []string{"List available keys: hotify-cli api-keys --action list"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitTargetNotFound)
 	}
 
-	fmt.Printf("✅ API key regenerated: %s\n", key.Name)
-	fmt.Printf("New Token: %s\n", key.Token)
-	fmt.Println("\nIMPORTANT: Update your authentication with this new token.")
+	keyData, _ := keyToMap(key)
+	result := CommandResult{
+		Version: "1.0",
+		Success: true,
+		Data: map[string]interface{}{
+			"key": keyData,
+		},
+		Metadata: map[string]interface{}{
+			"action": "regenerated",
+			"warning": "Update your authentication with this new token.",
+		},
+	}
+	printOutput(result, format)
 }
 
-func handleAPIKeyPermissions(name, add, remove string) {
+func handleAPIKeyPermissions(name, add, remove string, format OutputFormat) {
 	if name == "" {
-		fmt.Println("Missing required flag: --name")
-		fmt.Println("Usage: hotify-cli api-keys permissions --name <name> [--add <perms>] [--remove <perms>]")
-		os.Exit(1)
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitInvalidArgument,
+				Type:        "missing_required_flags",
+				Message:     "Missing required flag: --name",
+				Recoverable: false,
+				Suggestions: []string{"Usage: hotify-cli api-keys --action permissions --name <name> [--add <perms>] [--remove <perms>]"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitInvalidArgument)
 	}
 
 	manager, err := NewAPIKeyManager()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating API key manager: %v\n", err)
-		os.Exit(1)
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitGenericFailure,
+				Type:        "manager_creation_failed",
+				Message:     fmt.Sprintf("Error creating API key manager: %v", err),
+				Recoverable: false,
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitGenericFailure)
 	}
 
 	var addPerms, removePerms []Permission
@@ -478,52 +663,131 @@ func handleAPIKeyPermissions(name, add, remove string) {
 	if add != "" {
 		addPerms, err1 = ParsePermissions(add)
 		if err1 != nil {
-			fmt.Fprintf(os.Stderr, "Error parsing add permissions: %v\n", err1)
-			os.Exit(1)
+			result := CommandResult{
+				Version: "1.0",
+				Success: false,
+				Error: &CommandError{
+					Code:        ExitInvalidArgument,
+					Type:        "invalid_permissions",
+					Message:     fmt.Sprintf("Error parsing add permissions: %v", err1),
+					Recoverable: false,
+					Suggestions: []string{"Valid permissions: deploy, start, stop, logs, config, admin"},
+				},
+			}
+			printOutput(result, format)
+			os.Exit(ExitInvalidArgument)
 		}
 	}
 
 	if remove != "" {
 		removePerms, err2 = ParsePermissions(remove)
 		if err2 != nil {
-			fmt.Fprintf(os.Stderr, "Error parsing remove permissions: %v\n", err2)
-			os.Exit(1)
+			result := CommandResult{
+				Version: "1.0",
+				Success: false,
+				Error: &CommandError{
+					Code:        ExitInvalidArgument,
+					Type:        "invalid_permissions",
+					Message:     fmt.Sprintf("Error parsing remove permissions: %v", err2),
+					Recoverable: false,
+					Suggestions: []string{"Valid permissions: deploy, start, stop, logs, config, admin"},
+				},
+			}
+			printOutput(result, format)
+			os.Exit(ExitInvalidArgument)
 		}
 	}
 
 	if err := manager.UpdatePermissions(name, addPerms, removePerms); err != nil {
-		fmt.Fprintf(os.Stderr, "Error updating permissions: %v\n", err)
-		os.Exit(1)
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitTargetNotFound,
+				Type:        "permission_update_failed",
+				Message:     fmt.Sprintf("Error updating permissions: %v", err),
+				Recoverable: false,
+				Suggestions: []string{"Check if key exists", "Verify permissions are valid"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitTargetNotFound)
 	}
 
-	fmt.Printf("✅ Permissions updated for: %s\n", name)
+	result := CommandResult{
+		Version: "1.0",
+		Success: true,
+		Data: map[string]interface{}{
+			"key": name,
+			"added_permissions":   addPerms,
+			"removed_permissions": removePerms,
+		},
+		Metadata: map[string]interface{}{
+			"action": "permissions_updated",
+		},
+	}
+	printOutput(result, format)
 }
 
-func handleAPIKeyUsage(name string) {
+func handleAPIKeyUsage(name string, format OutputFormat) {
 	if name == "" {
-		fmt.Println("Missing required flag: --name")
-		fmt.Println("Usage: hotify-cli api-keys usage --name <name>")
-		os.Exit(1)
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitInvalidArgument,
+				Type:        "missing_required_flags",
+				Message:     "Missing required flag: --name",
+				Recoverable: false,
+				Suggestions: []string{"Usage: hotify-cli api-keys --action usage --name <name>"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitInvalidArgument)
 	}
 
 	manager, err := NewAPIKeyManager()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating API key manager: %v\n", err)
-		os.Exit(1)
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitGenericFailure,
+				Type:        "manager_creation_failed",
+				Message:     fmt.Sprintf("Error creating API key manager: %v", err),
+				Recoverable: false,
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitGenericFailure)
 	}
 
 	usage, err := manager.GetKeyUsage(name)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error getting key usage: %v\n", err)
-		os.Exit(1)
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitTargetNotFound,
+				Type:        "key_not_found",
+				Message:     fmt.Sprintf("Error getting key usage: %v", err),
+				Recoverable: false,
+				Suggestions: []string{"List available keys: hotify-cli api-keys --action list"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitTargetNotFound)
 	}
 
-	fmt.Printf("Usage for %s:\n", name)
-	fmt.Printf("Last Used: %s\n", usage["last_used"])
-	fmt.Printf("Request Count (24h): %d\n", usage["request_count"])
-	fmt.Printf("Failed Attempts: %d\n", usage["failed_attempts"])
-	fmt.Printf("Created: %s\n", usage["created_at"])
-	fmt.Printf("Expires: %s\n", usage["expires_at"])
+	result := CommandResult{
+		Version: "1.0",
+		Success: true,
+		Data: map[string]interface{}{
+			"key":   name,
+			"usage": usage,
+		},
+	}
+	printOutput(result, format)
 }
 
 // maskToken masks a token for display

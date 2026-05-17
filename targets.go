@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"time"
 )
 
 // handleTargets handles the targets CLI command
@@ -11,38 +12,74 @@ func handleTargets() {
 	targetsCmd := flag.NewFlagSet("targets", flag.ExitOnError)
 	action := targetsCmd.String("action", "list", "Action: use, list, remove, set-default, validate")
 	name := targetsCmd.String("name", "", "Target name")
-	targetsCmd.Parse(os.Args[2:])
+	
+	// Filter out --human flag before parsing
+	filteredArgs := filterHumanFlag(os.Args[2:])
+	targetsCmd.Parse(filteredArgs)
+
+	// Determine output format (JSON by default, --human for text)
+	format := getOutputFormat()
 
 	switch *action {
 	case "use":
-		handleTargetUse(*name)
+		handleTargetUse(*name, format)
 	case "list":
-		handleTargetList()
+		handleTargetList(format)
 	case "remove":
-		handleTargetRemove(*name)
+		handleTargetRemove(*name, format)
 	case "set-default":
-		handleTargetSetDefault(*name)
+		handleTargetSetDefault(*name, format)
 	case "validate":
-		handleTargetValidate(*name)
+		handleTargetValidate(*name, format)
 	default:
-		fmt.Println("Unknown action:", *action)
-		fmt.Println("Valid actions: use, list, remove, set-default, validate")
-		os.Exit(1)
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitInvalidArgument,
+				Type:        "invalid_argument",
+				Message:     fmt.Sprintf("Unknown action: %s", *action),
+				Recoverable: false,
+				Suggestions: []string{"Valid actions: use, list, remove, set-default, validate"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitInvalidArgument)
 	}
 }
 
 // handleTargetUse sets a target as the active target for subsequent commands
-func handleTargetUse(name string) {
+func handleTargetUse(name string, format OutputFormat) {
 	if name == "" {
-		fmt.Println("Missing required flag: --name")
-		fmt.Println("Usage: hotify-cli targets --action use --name <name>")
-		os.Exit(1)
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitInvalidArgument,
+				Type:        "missing_required_flags",
+				Message:     "Missing required flag: --name",
+				Recoverable: false,
+				Suggestions: []string{"Usage: hotify-cli targets --action use --name <name>"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitInvalidArgument)
 	}
 
 	config, err := loadConfig()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
-		os.Exit(1)
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitGenericFailure,
+				Type:        "config_load_failed",
+				Message:     fmt.Sprintf("Error loading config: %v", err),
+				Recoverable: false,
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitGenericFailure)
 	}
 
 	// Find target
@@ -55,70 +92,101 @@ func handleTargetUse(name string) {
 	}
 
 	if target == nil {
-		fmt.Printf("Target '%s' not found\n", name)
-		fmt.Println("Available targets:")
+		availableTargets := []string{}
 		for _, remote := range config.Remotes {
-			fmt.Printf("  - %s (%s)\n", remote.Name, remote.URL)
+			availableTargets = append(availableTargets, fmt.Sprintf("%s (%s)", remote.Name, remote.URL))
 		}
-		os.Exit(1)
+		
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitTargetNotFound,
+				Type:        "target_not_found",
+				Message:     fmt.Sprintf("Target '%s' not found", name),
+				Recoverable: false,
+				Suggestions: []string{"Available targets:"},
+			},
+			Data: map[string]interface{}{
+				"available_targets": availableTargets,
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitTargetNotFound)
+	}
 	}
 
-	// Set as default
-	for i := range config.Remotes {
-		config.Remotes[i].Default = (config.Remotes[i].Name == name)
-	}
-
-	if err := saveConfig(config); err != nil {
-		fmt.Fprintf(os.Stderr, "Error saving config: %v\n", err)
-		os.Exit(1)
-	}
-
-	fmt.Printf("✅ Target set to: %s\n", name)
-	fmt.Printf("URL: %s\n", target.URL)
-	fmt.Printf("Permissions: %v\n", target.Permissions)
-}
-
-// handleTargetList lists all configured targets
-func handleTargetList() {
+func handleTargetList(format OutputFormat) {
 	config, err := loadConfig()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
-		os.Exit(1)
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitGenericFailure,
+				Type:        "config_load_failed",
+				Message:     fmt.Sprintf("Error loading config: %v", err),
+				Recoverable: false,
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitGenericFailure)
 	}
 
-	if len(config.Remotes) == 0 {
-		fmt.Println("No targets configured")
-		fmt.Println("Add a target with: hotify-cli auth --action add --url <url> --token <token> --name <name>")
-		return
-	}
-
-	fmt.Println("Configured Targets:")
-	fmt.Println("===================")
+	targets := []map[string]interface{}{}
 	for _, remote := range config.Remotes {
-		defaultMark := ""
-		if remote.Default {
-			defaultMark = " (default)"
-		}
-		fmt.Printf("Name: %s%s\n", remote.Name, defaultMark)
-		fmt.Printf("URL: %s\n", remote.URL)
-		fmt.Printf("Permissions: %v\n", remote.Permissions)
-		fmt.Printf("Last Used: %s\n", remote.LastUsed)
-		fmt.Println()
+		targets = append(targets, map[string]interface{}{
+			"name":        remote.Name,
+			"url":         remote.URL,
+			"ssh_host":    remote.SSHHost,
+			"permissions": remote.Permissions,
+			"default":     remote.Default,
+			"last_used":   remote.LastUsed,
+		})
 	}
+
+	result := CommandResult{
+		Version: "1.0",
+		Success: true,
+		Data: map[string]interface{}{
+			"targets": targets,
+			"count":   len(targets),
+		},
+	}
+	printOutput(result, format)
 }
 
-// handleTargetRemove removes a target
-func handleTargetRemove(name string) {
+func handleTargetRemove(name string, format OutputFormat) {
 	if name == "" {
-		fmt.Println("Missing required flag: --name")
-		fmt.Println("Usage: hotify-cli targets --action remove --name <name>")
-		os.Exit(1)
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitInvalidArgument,
+				Type:        "missing_required_flags",
+				Message:     "Missing required flag: --name",
+				Recoverable: false,
+				Suggestions: []string{"Usage: hotify-cli targets --action remove --name <name>"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitInvalidArgument)
 	}
 
 	config, err := loadConfig()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
-		os.Exit(1)
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitGenericFailure,
+				Type:        "config_load_failed",
+				Message:     fmt.Sprintf("Error loading config: %v", err),
+				Recoverable: false,
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitGenericFailure)
 	}
 
 	// Find and remove target
@@ -133,8 +201,19 @@ func handleTargetRemove(name string) {
 	}
 
 	if !found {
-		fmt.Printf("Target '%s' not found\n", name)
-		os.Exit(1)
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitTargetNotFound,
+				Type:        "target_not_found",
+				Message:     fmt.Sprintf("Target '%s' not found", name),
+				Recoverable: false,
+				Suggestions: []string{"List available targets: hotify-cli targets --action list"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitTargetNotFound)
 	}
 
 	// If we removed the default target, set a new default
@@ -153,37 +232,299 @@ func handleTargetRemove(name string) {
 	config.Remotes = updatedRemotes
 
 	if err := saveConfig(config); err != nil {
-		fmt.Fprintf(os.Stderr, "Error saving config: %v\n", err)
-		os.Exit(1)
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitGenericFailure,
+				Type:        "config_save_failed",
+				Message:     fmt.Sprintf("Error saving config: %v", err),
+				Recoverable: false,
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitGenericFailure)
 	}
 
-	fmt.Printf("✅ Target removed: %s\n", name)
-	if wasDefault && len(updatedRemotes) > 0 {
-		fmt.Printf("New default target: %s\n", updatedRemotes[0].Name)
+	result := CommandResult{
+		Version: "1.0",
+		Success: true,
+		Data: map[string]interface{}{
+			"removed_target": name,
+		},
+		Metadata: map[string]interface{}{
+			"action": "removed",
+		},
 	}
+	printOutput(result, format)
 }
 
-// handleTargetSetDefault sets a target as default (alias for use)
-func handleTargetSetDefault(name string) {
-	handleTargetUse(name)
-}
+func handleTargetSetDefault(name string, format OutputFormat) {
+	if name == "" {
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitInvalidArgument,
+				Type:        "missing_required_flags",
+				Message:     "Missing required flag: --name",
+				Recoverable: false,
+				Suggestions: []string{"Usage: hotify-cli targets --action set-default --name <name>"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitInvalidArgument)
+	}
 
-// handleTargetValidate validates a target's connectivity
-func handleTargetValidate(name string) {
-	target, err := getActiveTarget(name)
+	config, err := loadConfig()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitGenericFailure,
+				Type:        "config_load_failed",
+				Message:     fmt.Sprintf("Error loading config: %v", err),
+				Recoverable: false,
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitGenericFailure)
 	}
 
-	if err := validateTarget(target); err != nil {
-		fmt.Fprintf(os.Stderr, "Validation failed: %v\n", err)
-		os.Exit(1)
+	// Find target
+	var target *Remote
+	for i := range config.Remotes {
+		if config.Remotes[i].Name == name {
+			target = &config.Remotes[i]
+			break
+		}
 	}
 
-	fmt.Printf("✅ Target '%s' is accessible and authenticated\n", target.Name)
-	fmt.Printf("URL: %s\n", target.URL)
-	fmt.Printf("Permissions: %v\n", target.Permissions)
+	if target == nil {
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitTargetNotFound,
+				Type:        "target_not_found",
+				Message:     fmt.Sprintf("Target '%s' not found", name),
+				Recoverable: false,
+				Suggestions: []string{"List available targets: hotify-cli targets --action list"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitTargetNotFound)
+	}
+
+	// Set as default
+	for i := range config.Remotes {
+		config.Remotes[i].Default = (config.Remotes[i].Name == name)
+	}
+
+	if err := saveConfig(config); err != nil {
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitGenericFailure,
+				Type:        "config_save_failed",
+				Message:     fmt.Sprintf("Error saving config: %v", err),
+				Recoverable: false,
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitGenericFailure)
+	}
+
+	result := CommandResult{
+		Version: "1.0",
+		Success: true,
+		Data: map[string]interface{}{
+			"default_target": name,
+		},
+		Metadata: map[string]interface{}{
+			"action": "set_as_default",
+		},
+	}
+	printOutput(result, format)
+}
+
+func handleTargetValidate(name string, format OutputFormat) {
+	// If no name specified, validate default target
+	if name == "" {
+		target, err := getActiveTarget("")
+		if err != nil {
+			result := CommandResult{
+				Version: "1.0",
+				Success: false,
+				Error: &CommandError{
+					Code:        ExitTargetNotFound,
+					Type:        "no_default_target",
+					Message:     fmt.Sprintf("Error: %v", err),
+					Recoverable: false,
+					Suggestions: []string{
+						"Usage: hotify-cli targets --action validate --name <name>",
+						"Set default target: hotify-cli targets --action use --name <name>",
+					},
+				},
+			}
+			printOutput(result, format)
+			os.Exit(ExitTargetNotFound)
+		}
+		name = target.Name
+	}
+
+	config, err := loadConfig()
+	if err != nil {
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitGenericFailure,
+				Type:        "config_load_failed",
+				Message:     fmt.Sprintf("Error loading config: %v", err),
+				Recoverable: false,
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitGenericFailure)
+	}
+
+	// Find target
+	var target *Remote
+	for i := range config.Remotes {
+		if config.Remotes[i].Name == name {
+			target = &config.Remotes[i]
+			break
+		}
+	}
+
+	if target == nil {
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitTargetNotFound,
+				Type:        "target_not_found",
+				Message:     fmt.Sprintf("Target '%s' not found", name),
+				Recoverable: false,
+				Suggestions: []string{"List available targets: hotify-cli targets --action list"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitTargetNotFound)
+	}
+
+	// Test connection
+	security, err := NewSecurityManager()
+	if err != nil {
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitGenericFailure,
+				Type:        "security_manager_failed",
+				Message:     fmt.Sprintf("Error creating security manager: %v", err),
+				Recoverable: false,
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitGenericFailure)
+	}
+
+	token, err := security.DecryptToken(target.AuthToken)
+	if err != nil {
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitGenericFailure,
+				Type:        "decryption_failed",
+				Message:     fmt.Sprintf("Error decrypting token: %v", err),
+				Recoverable: false,
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitGenericFailure)
+	}
+
+	// Test connection
+	client, err := NewAuthClient(target.URL, token)
+	if err != nil {
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitConnectionTimeout,
+				Type:        "connection_failed",
+				Message:     fmt.Sprintf("Error creating auth client: %v", err),
+				Recoverable: true,
+				Suggestions: []string{"Check URL is correct", "Check network connectivity"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitConnectionTimeout)
+	}
+
+	valid, err := client.ValidateToken()
+	if err != nil {
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitConnectionTimeout,
+				Type:        "validation_failed",
+				Message:     fmt.Sprintf("Connection test failed for %s: %v", name, err),
+				Recoverable: true,
+				Suggestions: []string{"Check remote daemon is running", "Verify network connectivity"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitConnectionTimeout)
+	}
+
+	if !valid {
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitConnectionTimeout,
+				Type:        "invalid_token",
+				Message:     fmt.Sprintf("Connection test failed for %s: invalid token", name),
+				Recoverable: false,
+				Suggestions: []string{"Re-authenticate: hotify-cli auth --action add --url <url> --token <token> --name <name>"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitConnectionTimeout)
+	}
+
+	// Update last used
+	now := time.Now().Format(time.RFC3339)
+	for i := range config.Remotes {
+		if config.Remotes[i].Name == name {
+			config.Remotes[i].LastUsed = now
+			break
+		}
+	}
+	saveConfig(config)
+
+	result := CommandResult{
+		Version: "1.0",
+		Success: true,
+		Data: map[string]interface{}{
+			"target": map[string]interface{}{
+				"name":   name,
+				"url":    target.URL,
+				"valid":  true,
+			},
+		},
+		Metadata: map[string]interface{}{
+			"action": "validated",
+		},
+	}
+	printOutput(result, format)
 }
 
 // getDefaultTarget returns the default target from config
@@ -213,9 +554,9 @@ func getTargetByName(name string) (*Remote, error) {
 		return nil, err
 	}
 
-	for _, remote := range config.Remotes {
-		if remote.Name == name {
-			return &remote, nil
+	for i := range config.Remotes {
+		if config.Remotes[i].Name == name {
+			return &config.Remotes[i], nil
 		}
 	}
 

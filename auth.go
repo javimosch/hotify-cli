@@ -198,65 +198,143 @@ func handleAuth() {
 	name := authCmd.String("name", "", "Remote name")
 	target := authCmd.String("target", "", "Target name (uses default if not specified)")
 	action := authCmd.String("action", "add", "Action: add, remove, list, test")
-	authCmd.Parse(os.Args[2:])
+	
+	// Filter out --human flag before parsing
+	filteredArgs := filterHumanFlag(os.Args[2:])
+	authCmd.Parse(filteredArgs)
+
+	// Determine output format (JSON by default, --human for text)
+	format := getOutputFormat()
 
 	switch *action {
 	case "add":
-		handleAuthAdd(*url, *token, *name)
+		handleAuthAdd(*url, *token, *name, format)
 	case "remove":
-		handleAuthRemove(*name)
+		handleAuthRemove(*name, format)
 	case "list":
-		handleAuthList()
+		handleAuthList(format)
 	case "test":
 		// Use --target if specified, otherwise use --name
 		if *target != "" {
-			handleAuthTest(*target)
+			handleAuthTest(*target, format)
 		} else {
-			handleAuthTest(*name)
+			handleAuthTest(*name, format)
 		}
 	default:
-		fmt.Println("Unknown action:", *action)
-		fmt.Println("Valid actions: add, remove, list, test")
-		os.Exit(1)
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitInvalidArgument,
+				Type:        "invalid_argument",
+				Message:     fmt.Sprintf("Unknown action: %s", *action),
+				Recoverable: false,
+				Suggestions: []string{"Valid actions: add, remove, list, test"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitInvalidArgument)
 	}
 }
 
-func handleAuthAdd(url, token, name string) {
+func handleAuthAdd(url, token, name string, format OutputFormat) {
 	if url == "" || token == "" || name == "" {
-		fmt.Println("Missing required flags")
-		fmt.Println("Usage: hotify-cli auth --url <url> --token <token> --name <name>")
-		os.Exit(1)
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitInvalidArgument,
+				Type:        "missing_required_flags",
+				Message:     "Missing required flags: url, token, name",
+				Recoverable: false,
+				Suggestions: []string{"Usage: hotify-cli auth --action add --url <url> --token <token> --name <name>"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitInvalidArgument)
 	}
 
 	config, err := loadConfig()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
-		os.Exit(1)
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitGenericFailure,
+				Type:        "config_load_failed",
+				Message:     fmt.Sprintf("Error loading config: %v", err),
+				Recoverable: false,
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitGenericFailure)
 	}
 
 	// Test connection first
 	client, err := NewAuthClient(url, token)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating auth client: %v\n", err)
-		os.Exit(1)
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitConnectionTimeout,
+				Type:        "connection_failed",
+				Message:     fmt.Sprintf("Error creating auth client: %v", err),
+				Recoverable: true,
+				Suggestions: []string{"Check URL is correct", "Check network connectivity"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitConnectionTimeout)
 	}
 
 	if err := client.Authenticate(); err != nil {
-		fmt.Fprintf(os.Stderr, "Authentication failed: %v\n", err)
-		os.Exit(1)
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitConnectionTimeout,
+				Type:        "authentication_failed",
+				Message:     fmt.Sprintf("Authentication failed: %v", err),
+				Recoverable: true,
+				Suggestions: []string{"Verify token is correct", "Check remote daemon is running"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitConnectionTimeout)
 	}
 
 	// Encrypt token and save to config
 	security, err := NewSecurityManager()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating security manager: %v\n", err)
-		os.Exit(1)
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitGenericFailure,
+				Type:        "security_manager_failed",
+				Message:     fmt.Sprintf("Error creating security manager: %v", err),
+				Recoverable: false,
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitGenericFailure)
 	}
 
 	encryptedToken, err := security.EncryptToken(token)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error encrypting token: %v\n", err)
-		os.Exit(1)
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitGenericFailure,
+				Type:        "encryption_failed",
+				Message:     fmt.Sprintf("Error encrypting token: %v", err),
+				Recoverable: false,
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitGenericFailure)
 	}
 
 	// Get permissions
@@ -275,26 +353,69 @@ func handleAuthAdd(url, token, name string) {
 	config.Remotes = append(config.Remotes, newRemote)
 
 	if err := saveConfig(config); err != nil {
-		fmt.Fprintf(os.Stderr, "Error saving config: %v\n", err)
-		os.Exit(1)
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitGenericFailure,
+				Type:        "config_save_failed",
+				Message:     fmt.Sprintf("Error saving config: %v", err),
+				Recoverable: false,
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitGenericFailure)
 	}
 
-	fmt.Printf("✅ Successfully authenticated with remote: %s\n", name)
-	fmt.Printf("URL: %s\n", url)
-	fmt.Printf("Permissions: %v\n", permissions)
+	result := CommandResult{
+		Version: "1.0",
+		Success: true,
+		Data: map[string]interface{}{
+			"remote": map[string]interface{}{
+				"name":        name,
+				"url":         url,
+				"permissions": permissions,
+				"default":     len(config.Remotes) == 1,
+			},
+		},
+		Metadata: map[string]interface{}{
+			"action": "authenticated",
+		},
+	}
+	printOutput(result, format)
 }
 
-func handleAuthRemove(name string) {
+func handleAuthRemove(name string, format OutputFormat) {
 	if name == "" {
-		fmt.Println("Missing required flag: --name")
-		fmt.Println("Usage: hotify-cli auth remove --name <name>")
-		os.Exit(1)
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitInvalidArgument,
+				Type:        "missing_required_flags",
+				Message:     "Missing required flag: --name",
+				Recoverable: false,
+				Suggestions: []string{"Usage: hotify-cli auth --action remove --name <name>"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitInvalidArgument)
 	}
 
 	config, err := loadConfig()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
-		os.Exit(1)
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitGenericFailure,
+				Type:        "config_load_failed",
+				Message:     fmt.Sprintf("Error loading config: %v", err),
+				Recoverable: false,
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitGenericFailure)
 	}
 
 	// Find and remove remote
@@ -309,64 +430,129 @@ func handleAuthRemove(name string) {
 	}
 
 	if !found {
-		fmt.Printf("Remote '%s' not found\n", name)
-		os.Exit(1)
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitTargetNotFound,
+				Type:        "remote_not_found",
+				Message:     fmt.Sprintf("Remote '%s' not found", name),
+				Recoverable: false,
+				Suggestions: []string{"List available remotes: hotify-cli auth --action list"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitTargetNotFound)
 	}
 
 	config.Remotes = updatedRemotes
 
 	if err := saveConfig(config); err != nil {
-		fmt.Fprintf(os.Stderr, "Error saving config: %v\n", err)
-		os.Exit(1)
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitGenericFailure,
+				Type:        "config_save_failed",
+				Message:     fmt.Sprintf("Error saving config: %v", err),
+				Recoverable: false,
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitGenericFailure)
 	}
 
-	fmt.Printf("✅ Removed remote: %s\n", name)
+	result := CommandResult{
+		Version: "1.0",
+		Success: true,
+		Data: map[string]interface{}{
+			"removed_remote": name,
+		},
+		Metadata: map[string]interface{}{
+			"action": "removed",
+		},
+	}
+	printOutput(result, format)
 }
 
-func handleAuthList() {
+func handleAuthList(format OutputFormat) {
 	config, err := loadConfig()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
-		os.Exit(1)
-	}
-
-	if len(config.Remotes) == 0 {
-		fmt.Println("No authenticated remotes")
-		return
-	}
-
-	fmt.Println("Authenticated Remotes:")
-	fmt.Println("====================")
-	for _, remote := range config.Remotes {
-		defaultMark := ""
-		if remote.Default {
-			defaultMark = " (default)"
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitGenericFailure,
+				Type:        "config_load_failed",
+				Message:     fmt.Sprintf("Error loading config: %v", err),
+				Recoverable: false,
+			},
 		}
-		fmt.Printf("Name: %s%s\n", remote.Name, defaultMark)
-		fmt.Printf("URL: %s\n", remote.URL)
-		fmt.Printf("Permissions: %v\n", remote.Permissions)
-		fmt.Printf("Last Used: %s\n", remote.LastUsed)
-		fmt.Println()
+		printOutput(result, format)
+		os.Exit(ExitGenericFailure)
 	}
+
+	remotes := []map[string]interface{}{}
+	for _, remote := range config.Remotes {
+		remotes = append(remotes, map[string]interface{}{
+			"name":        remote.Name,
+			"url":         remote.URL,
+			"permissions": remote.Permissions,
+			"default":     remote.Default,
+			"last_used":   remote.LastUsed,
+		})
+	}
+
+	result := CommandResult{
+		Version: "1.0",
+		Success: true,
+		Data: map[string]interface{}{
+			"remotes": remotes,
+			"count":   len(remotes),
+		},
+	}
+	printOutput(result, format)
 }
 
-func handleAuthTest(name string) {
+func handleAuthTest(name string, format OutputFormat) {
 	// If no name specified, use default target
 	if name == "" {
 		target, err := getActiveTarget("")
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			fmt.Println("Usage: hotify-cli auth test --name <name>")
-			fmt.Println("   or: hotify-cli targets --action use --name <name>")
-			os.Exit(1)
+			result := CommandResult{
+				Version: "1.0",
+				Success: false,
+				Error: &CommandError{
+					Code:        ExitTargetNotFound,
+					Type:        "no_default_target",
+					Message:     fmt.Sprintf("Error: %v", err),
+					Recoverable: false,
+					Suggestions: []string{
+						"Usage: hotify-cli auth --action test --name <name>",
+						"Set default target: hotify-cli targets --action use --name <name>",
+					},
+				},
+			}
+			printOutput(result, format)
+			os.Exit(ExitTargetNotFound)
 		}
 		name = target.Name
 	}
 
 	config, err := loadConfig()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
-		os.Exit(1)
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitGenericFailure,
+				Type:        "config_load_failed",
+				Message:     fmt.Sprintf("Error loading config: %v", err),
+				Recoverable: false,
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitGenericFailure)
 	}
 
 	// Find remote
@@ -379,39 +565,103 @@ func handleAuthTest(name string) {
 	}
 
 	if remote == nil {
-		fmt.Printf("Remote '%s' not found\n", name)
-		os.Exit(1)
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitTargetNotFound,
+				Type:        "remote_not_found",
+				Message:     fmt.Sprintf("Remote '%s' not found", name),
+				Recoverable: false,
+				Suggestions: []string{"List available remotes: hotify-cli auth --action list"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitTargetNotFound)
 	}
 
 	// Decrypt token
 	security, err := NewSecurityManager()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating security manager: %v\n", err)
-		os.Exit(1)
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitGenericFailure,
+				Type:        "security_manager_failed",
+				Message:     fmt.Sprintf("Error creating security manager: %v", err),
+				Recoverable: false,
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitGenericFailure)
 	}
 
 	token, err := security.DecryptToken(remote.AuthToken)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error decrypting token: %v\n", err)
-		os.Exit(1)
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitGenericFailure,
+				Type:        "decryption_failed",
+				Message:     fmt.Sprintf("Error decrypting token: %v", err),
+				Recoverable: false,
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitGenericFailure)
 	}
 
 	// Test connection
 	client, err := NewAuthClient(remote.URL, token)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating auth client: %v\n", err)
-		os.Exit(1)
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitConnectionTimeout,
+				Type:        "connection_failed",
+				Message:     fmt.Sprintf("Error creating auth client: %v", err),
+				Recoverable: true,
+				Suggestions: []string{"Check URL is correct", "Check network connectivity"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitConnectionTimeout)
 	}
 
 	valid, err := client.ValidateToken()
 	if err != nil {
-		fmt.Printf("❌ Connection test failed for %s: %v\n", name, err)
-		os.Exit(1)
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitConnectionTimeout,
+				Type:        "connection_test_failed",
+				Message:     fmt.Sprintf("Connection test failed for %s: %v", name, err),
+				Recoverable: true,
+				Suggestions: []string{"Check remote daemon is running", "Verify network connectivity"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitConnectionTimeout)
 	}
 
 	if !valid {
-		fmt.Printf("❌ Connection test failed for %s: invalid token\n", name)
-		os.Exit(1)
+		result := CommandResult{
+			Version: "1.0",
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitConnectionTimeout,
+				Type:        "invalid_token",
+				Message:     fmt.Sprintf("Connection test failed for %s: invalid token", name),
+				Recoverable: false,
+				Suggestions: []string{"Re-authenticate: hotify-cli auth --action add --url <url> --token <token> --name <name>"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitConnectionTimeout)
 	}
 
 	// Update last used
@@ -424,6 +674,20 @@ func handleAuthTest(name string) {
 	}
 	saveConfig(config)
 
-	fmt.Printf("✅ Connection successful to %s\n", name)
-	fmt.Printf("Permissions: %v\n", remote.Permissions)
+	result := CommandResult{
+		Version: "1.0",
+		Success: true,
+		Data: map[string]interface{}{
+			"remote": map[string]interface{}{
+				"name":        name,
+				"url":         remote.URL,
+				"permissions": remote.Permissions,
+				"valid":       true,
+			},
+		},
+		Metadata: map[string]interface{}{
+			"action": "tested",
+		},
+	}
+	printOutput(result, format)
 }

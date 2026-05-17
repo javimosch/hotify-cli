@@ -233,38 +233,8 @@ func (h *HTTPClient) Post(path string, payload map[string]interface{}) error {
 	return nil
 }
 
-// OutputFormat controls command output format
-type OutputFormat string
-
+// Exit codes for deploy operations
 const (
-	OutputFormatText OutputFormat = "text"
-	OutputFormatJSON OutputFormat = "json"
-)
-
-// CommandResult represents a structured command result
-type CommandResult struct {
-	Version  string                 `json:"version"`
-	Success  bool                   `json:"success"`
-	Data     map[string]interface{} `json:"data,omitempty"`
-	Error    *CommandError          `json:"error,omitempty"`
-	Metadata map[string]interface{} `json:"metadata,omitempty"`
-}
-
-// CommandError represents a structured error
-type CommandError struct {
-	Code        int      `json:"code"`
-	Type        string   `json:"type"`
-	Message     string   `json:"message"`
-	Details     map[string]interface{} `json:"details,omitempty"`
-	Recoverable bool     `json:"recoverable"`
-	RetryAfter  *int     `json:"retry_after,omitempty"`
-	Suggestions []string `json:"suggestions,omitempty"`
-}
-
-// Exit codes
-const (
-	ExitSuccess                = 0
-	ExitGenericFailure         = 1
 	ExitTraefikNotInstalled    = 90
 	ExitTraefikAlreadyInstalled = 91
 	ExitTraefikInstallFailed   = 92
@@ -272,28 +242,8 @@ const (
 	ExitTraefikConfigInvalid   = 94
 	ExitPermissionsError       = 95
 	ExitTargetNotFound        = 96
-	ExitInvalidArgument       = 97
 	ExitConnectionTimeout     = 105
 )
-
-// printOutput prints command result in the specified format
-func printOutput(result CommandResult, format OutputFormat) {
-	if format == OutputFormatJSON {
-		json.NewEncoder(os.Stdout).Encode(result)
-	} else {
-		if result.Success {
-			fmt.Println("✅ Success")
-			for key, value := range result.Data {
-				fmt.Printf("%s: %v\n", key, value)
-			}
-		} else {
-			fmt.Fprintf(os.Stderr, "❌ Error: %s\n", result.Error.Message)
-			for _, suggestion := range result.Error.Suggestions {
-				fmt.Fprintf(os.Stderr, "  → %s\n", suggestion)
-			}
-		}
-	}
-}
 
 func (h *HTTPClient) Get(path string) (map[string]interface{}, error) {
 	req, err := http.NewRequest("GET", h.BaseURL+path, nil)
@@ -423,82 +373,171 @@ func handleDeploy() {
 	source := deployCmd.String("source", "", "Source binary path (required)")
 	target := deployCmd.String("target", "", "Target name (uses default if not specified)")
 	action := deployCmd.String("action", "deploy", "Action: deploy, start, stop, restart, status")
-	deployCmd.Parse(os.Args[2:])
+	
+	// Filter out --human flag before parsing
+	filteredArgs := filterHumanFlag(os.Args[2:])
+	deployCmd.Parse(filteredArgs)
+
+	// Determine output format (JSON by default, --human for text)
+	format := getOutputFormat()
 
 	if *appID == "" {
-		fmt.Println("Missing required flag: --id")
-		fmt.Println("Usage: hotify-cli deploy --id <id> --source <source> [--target <target>]")
-		os.Exit(1)
+		result := CommandResult{
+			Version: Version,
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitInvalidArgument,
+				Type:        "validation_error",
+				Message:     "Missing required flag: --id",
+				Recoverable: false,
+				Suggestions: []string{"Provide app ID with --id flag"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitInvalidArgument)
 	}
 
 	// Get target
 	targetObj, err := getActiveTarget(*target)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		result := CommandResult{
+			Version: Version,
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitTargetNotFound,
+				Type:        "target_error",
+				Message:     err.Error(),
+				Recoverable: false,
+				Suggestions: []string{"Check target exists with: hotify-cli targets --action list", "Set default target with: hotify-cli targets --action use --name <name>"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitTargetNotFound)
 	}
 
 	switch *action {
 	case "deploy":
 		if *source == "" {
-			fmt.Println("Missing required flag: --source")
-			fmt.Println("Usage: hotify-cli deploy --id <id> --source <source>")
-			os.Exit(1)
+			result := CommandResult{
+				Version: Version,
+				Success: false,
+				Error: &CommandError{
+					Code:        ExitInvalidArgument,
+					Type:        "validation_error",
+					Message:     "Missing required flag: --source",
+					Recoverable: false,
+					Suggestions: []string{"Provide source path with --source flag"},
+				},
+			}
+			printOutput(result, format)
+			os.Exit(ExitInvalidArgument)
 		}
-		handleDeployAction(*appID, *source, targetObj)
+		handleDeployAction(*appID, *source, targetObj, format)
 	case "start":
-		handleRemoteStart(*appID, targetObj)
+		handleRemoteStart(*appID, targetObj, format)
 	case "stop":
-		handleRemoteStop(*appID, targetObj)
+		handleRemoteStop(*appID, targetObj, format)
 	case "restart":
-		handleRemoteRestart(*appID, targetObj)
+		handleRemoteRestart(*appID, targetObj, format)
 	case "status":
-		handleRemoteStatus(*appID, targetObj)
+		handleRemoteStatus(*appID, targetObj, format)
 	default:
-		fmt.Println("Unknown action:", *action)
-		fmt.Println("Valid actions: deploy, start, stop, restart, status")
-		os.Exit(1)
+		result := CommandResult{
+			Version: Version,
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitInvalidArgument,
+				Type:        "validation_error",
+				Message:     fmt.Sprintf("Unknown action: %s", *action),
+				Recoverable: false,
+				Suggestions: []string{"Valid actions: deploy, start, stop, restart, status"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitInvalidArgument)
 	}
 }
 
-func handleDeployAction(appID, source string, target *Remote) {
-	fmt.Printf("Deploying app %s to target %s\n", appID, target.Name)
+func handleDeployAction(appID, source string, target *Remote, format OutputFormat) {
+	if format == OutputFormatText {
+		fmt.Printf("Deploying app %s to target %s\n", appID, target.Name)
+	}
 
 	// Validate source
 	if err := ValidateSource(source); err != nil {
-		fmt.Fprintf(os.Stderr, "Source validation failed: %v\n", err)
-		os.Exit(1)
+		result := CommandResult{
+			Version: Version,
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitInvalidArgument,
+				Type:        "validation_error",
+				Message:     fmt.Sprintf("Source validation failed: %v", err),
+				Recoverable: false,
+				Suggestions: []string{"Check source path exists and is accessible", "Ensure source is a valid file or directory"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitInvalidArgument)
 	}
 
 	// Check if source exists
 	sourceInfo, err := os.Stat(source)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error accessing source: %v\n", err)
-		os.Exit(1)
+		result := CommandResult{
+			Version: Version,
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitInvalidArgument,
+				Type:        "validation_error",
+				Message:     fmt.Sprintf("Error accessing source: %v", err),
+				Recoverable: false,
+				Suggestions: []string{"Check source path is correct", "Ensure file/directory exists"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitInvalidArgument)
 	}
 
 	// Create deployment client
 	client, err := NewDeploymentClient(target)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating deployment client: %v\n", err)
-		os.Exit(1)
+		result := CommandResult{
+			Version: Version,
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitGenericFailure,
+				Type:        "client_error",
+				Message:     fmt.Sprintf("Error creating deployment client: %v", err),
+				Recoverable: false,
+				Suggestions: []string{"Check target configuration", "Verify authentication token"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitGenericFailure)
 	}
 
 	// Determine deployment type based on source
 	var deployErr error
 	var targetPath string
-	
+	var deploymentType string
+
 	if sourceInfo.IsDir() {
 		// Folder deployment
 		targetPath = fmt.Sprintf("/home/dk1/apps/%s", appID)
-		
-		fmt.Printf("📦 Deploying folder: %s -> %s\n", source, targetPath)
+		deploymentType = "folder"
+
+		if format == OutputFormatText {
+			fmt.Printf("📦 Deploying folder: %s -> %s\n", source, targetPath)
+		}
 		deployErr = client.DeployFolder(appID, source, targetPath)
 	} else {
 		// Binary deployment
 		targetPath = fmt.Sprintf("/home/dk1/apps/%s/%s", appID, filepath.Base(source))
-		
-		fmt.Printf("🔧 Deploying binary: %s -> %s\n", source, targetPath)
+		deploymentType = "binary"
+
+		if format == OutputFormatText {
+			fmt.Printf("🔧 Deploying binary: %s -> %s\n", source, targetPath)
+		}
 		deployErr = client.DeployBinary(appID, source, targetPath)
 	}
 
@@ -506,78 +545,250 @@ func handleDeployAction(appID, source string, target *Remote) {
 	defer CleanupTempFiles()
 
 	if deployErr != nil {
-		fmt.Fprintf(os.Stderr, "Deployment failed: %v\n", deployErr)
-		os.Exit(1)
+		result := CommandResult{
+			Version: Version,
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitGenericFailure,
+				Type:        "deployment_error",
+				Message:     fmt.Sprintf("Deployment failed: %v", deployErr),
+				Recoverable: true,
+				Suggestions: []string{"Check network connectivity to target", "Verify target server is running", "Check target disk space"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitGenericFailure)
 	}
 
-	fmt.Printf("✅ Deployment successful: %s\n", appID)
+	result := CommandResult{
+		Version: Version,
+		Success: true,
+		Data: map[string]interface{}{
+			"app_id":          appID,
+			"target":          target.Name,
+			"deployment_type": deploymentType,
+			"source":          source,
+			"target_path":     targetPath,
+		},
+		Metadata: map[string]interface{}{
+			"timestamp": time.Now().Unix(),
+		},
+	}
+	printOutput(result, format)
 }
 
-func handleRemoteStart(appID string, target *Remote) {
-	fmt.Printf("Starting app %s on target %s\n", appID, target.Name)
+func handleRemoteStart(appID string, target *Remote, format OutputFormat) {
+	if format == OutputFormatText {
+		fmt.Printf("Starting app %s on target %s\n", appID, target.Name)
+	}
 
 	client, err := NewDeploymentClient(target)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating deployment client: %v\n", err)
-		os.Exit(1)
+		result := CommandResult{
+			Version: Version,
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitGenericFailure,
+				Type:        "client_error",
+				Message:     fmt.Sprintf("Error creating deployment client: %v", err),
+				Recoverable: false,
+				Suggestions: []string{"Check target configuration", "Verify authentication token"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitGenericFailure)
 	}
 
 	if err := client.StartApp(appID); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to start app: %v\n", err)
-		os.Exit(1)
+		result := CommandResult{
+			Version: Version,
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitGenericFailure,
+				Type:        "start_error",
+				Message:     fmt.Sprintf("Failed to start app: %v", err),
+				Recoverable: true,
+				Suggestions: []string{"Check app configuration", "Verify app is installed", "Check app logs for errors"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitGenericFailure)
 	}
 
-	fmt.Printf("✅ App started: %s\n", appID)
+	result := CommandResult{
+		Version: Version,
+		Success: true,
+		Data: map[string]interface{}{
+			"app_id":  appID,
+			"target":  target.Name,
+			"action":  "start",
+			"status":  "started",
+		},
+		Metadata: map[string]interface{}{
+			"timestamp": time.Now().Unix(),
+		},
+	}
+	printOutput(result, format)
 }
 
-func handleRemoteStop(appID string, target *Remote) {
-	fmt.Printf("Stopping app %s on target %s\n", appID, target.Name)
+func handleRemoteStop(appID string, target *Remote, format OutputFormat) {
+	if format == OutputFormatText {
+		fmt.Printf("Stopping app %s on target %s\n", appID, target.Name)
+	}
 
 	client, err := NewDeploymentClient(target)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating deployment client: %v\n", err)
-		os.Exit(1)
+		result := CommandResult{
+			Version: Version,
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitGenericFailure,
+				Type:        "client_error",
+				Message:     fmt.Sprintf("Error creating deployment client: %v", err),
+				Recoverable: false,
+				Suggestions: []string{"Check target configuration", "Verify authentication token"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitGenericFailure)
 	}
 
 	if err := client.StopApp(appID); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to stop app: %v\n", err)
-		os.Exit(1)
+		result := CommandResult{
+			Version: Version,
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitGenericFailure,
+				Type:        "stop_error",
+				Message:     fmt.Sprintf("Failed to stop app: %v", err),
+				Recoverable: true,
+				Suggestions: []string{"Check if app is running", "Verify app configuration", "Check app logs for errors"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitGenericFailure)
 	}
 
-	fmt.Printf("✅ App stopped: %s\n", appID)
+	result := CommandResult{
+		Version: Version,
+		Success: true,
+		Data: map[string]interface{}{
+			"app_id":  appID,
+			"target":  target.Name,
+			"action":  "stop",
+			"status":  "stopped",
+		},
+		Metadata: map[string]interface{}{
+			"timestamp": time.Now().Unix(),
+		},
+	}
+	printOutput(result, format)
 }
 
-func handleRemoteRestart(appID string, target *Remote) {
-	fmt.Printf("Restarting app %s on target %s\n", appID, target.Name)
+func handleRemoteRestart(appID string, target *Remote, format OutputFormat) {
+	if format == OutputFormatText {
+		fmt.Printf("Restarting app %s on target %s\n", appID, target.Name)
+	}
 
 	client, err := NewDeploymentClient(target)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating deployment client: %v\n", err)
-		os.Exit(1)
+		result := CommandResult{
+			Version: Version,
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitGenericFailure,
+				Type:        "client_error",
+				Message:     fmt.Sprintf("Error creating deployment client: %v", err),
+				Recoverable: false,
+				Suggestions: []string{"Check target configuration", "Verify authentication token"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitGenericFailure)
 	}
 
 	if err := client.RestartApp(appID); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to restart app: %v\n", err)
-		os.Exit(1)
+		result := CommandResult{
+			Version: Version,
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitGenericFailure,
+				Type:        "restart_error",
+				Message:     fmt.Sprintf("Failed to restart app: %v", err),
+				Recoverable: true,
+				Suggestions: []string{"Check app configuration", "Verify app is installed", "Check app logs for errors"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitGenericFailure)
 	}
 
-	fmt.Printf("✅ App restarted: %s\n", appID)
+	result := CommandResult{
+		Version: Version,
+		Success: true,
+		Data: map[string]interface{}{
+			"app_id":  appID,
+			"target":  target.Name,
+			"action":  "restart",
+			"status":  "restarted",
+		},
+		Metadata: map[string]interface{}{
+			"timestamp": time.Now().Unix(),
+		},
+	}
+	printOutput(result, format)
 }
 
-func handleRemoteStatus(appID string, target *Remote) {
-	fmt.Printf("Checking status of app %s on target %s\n", appID, target.Name)
+func handleRemoteStatus(appID string, target *Remote, format OutputFormat) {
+	if format == OutputFormatText {
+		fmt.Printf("Checking status of app %s on target %s\n", appID, target.Name)
+	}
 
 	client, err := NewDeploymentClient(target)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating deployment client: %v\n", err)
-		os.Exit(1)
+		result := CommandResult{
+			Version: Version,
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitGenericFailure,
+				Type:        "client_error",
+				Message:     fmt.Sprintf("Error creating deployment client: %v", err),
+				Recoverable: false,
+				Suggestions: []string{"Check target configuration", "Verify authentication token"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitGenericFailure)
 	}
 
 	status, err := client.GetAppStatus(appID)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to get status: %v\n", err)
-		os.Exit(1)
+		result := CommandResult{
+			Version: Version,
+			Success: false,
+			Error: &CommandError{
+				Code:        ExitGenericFailure,
+				Type:        "status_error",
+				Message:     fmt.Sprintf("Failed to get status: %v", err),
+				Recoverable: true,
+				Suggestions: []string{"Check if app exists", "Verify app configuration", "Check target server connectivity"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitGenericFailure)
 	}
 
-	fmt.Printf("Status: %v\n", status)
+	result := CommandResult{
+		Version: Version,
+		Success: true,
+		Data: map[string]interface{}{
+			"app_id":  appID,
+			"target":  target.Name,
+			"status":  status,
+		},
+		Metadata: map[string]interface{}{
+			"timestamp": time.Now().Unix(),
+		},
+	}
+	printOutput(result, format)
 }
