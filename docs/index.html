@@ -3,21 +3,248 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>hotify-cli Documentation</title>
+    <title>hotify-cli - Traefik/Cloudflare App Management CLI</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
     <style>
       body { font-family: 'Inter', system-ui, sans-serif; background-color: #0a0a0b; color: #e2e8f0; }
-      h1 { font-family: 'Geist', system-ui, sans-serif; }
+      h1, h2, h3 { font-family: 'Geist', system-ui, sans-serif; }
+      .feature-card { background: linear-gradient(135deg, #1a1a1d 0%, #151517 100%); border: 1px solid #262629; transition: all 0.3s ease; }
+      .feature-card:hover { border-color: #3b82f6; transform: translateY(-2px); }
+      .code-block { background: #111113; border: 1px solid #262629; }
     </style>
   </head>
   <body class="bg-[#0a0a0b] min-h-screen">
     <div class="max-w-5xl mx-auto px-6 py-16">
-      <h1 class="text-5xl font-bold text-white tracking-tight">hotify-cli</h1>
-      <p class="text-slate-400 mt-3 text-lg"></p>
-      <nav class="mt-8">
-        <a href="changelog.html" class="inline-block px-5 py-2.5 rounded-lg border border-slate-700 text-slate-300 font-medium text-sm hover:border-blue-500 hover:text-blue-400 transition-all">Changelog</a>
-      </nav>
+      <!-- Hero Section -->
+      <header class="text-center mb-20">
+        <h1 class="text-6xl font-bold text-white tracking-tight mb-4">hotify-cli</h1>
+        <p class="text-xl text-slate-400 max-w-2xl mx-auto mb-8">
+          Traefik/Cloudflare app management CLI — deploy web apps behind Traefik with Cloudflare DNS and Let's Encrypt SSL certificates
+        </p>
+        <div class="flex gap-4 justify-center">
+          <a href="changelog.html" class="inline-block px-6 py-3 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 transition-all">
+            📋 View Changelog
+          </a>
+          <a href="https://github.com/javimosch/hotify-cli" target="_blank" class="inline-block px-6 py-3 rounded-lg border border-slate-700 text-slate-300 font-medium hover:border-blue-500 hover:text-blue-400 transition-all">
+            🔗 GitHub Repository
+          </a>
+        </div>
+        <p class="text-sm text-slate-500 mt-6">Current Version: v2.7.1</p>
+      </header>
+
+      <!-- Features Section -->
+      <section class="mb-20">
+        <h2 class="text-3xl font-semibold text-white mb-8">Key Features</h2>
+        <div class="grid md:grid-cols-2 gap-6">
+          <div class="feature-card rounded-xl p-6">
+            <div class="flex items-start gap-4">
+              <div class="w-12 h-12 rounded-lg bg-blue-500/10 flex items-center justify-center flex-shrink-0">
+                <span class="text-2xl">🚀</span>
+              </div>
+              <div>
+                <h3 class="text-lg font-semibold text-white mb-2">One-Command Deployment</h3>
+                <p class="text-slate-400 text-sm">Deploy apps with automatic DNS setup, SSL certificates, and reverse proxy configuration</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="feature-card rounded-xl p-6">
+            <div class="flex items-start gap-4">
+              <div class="w-12 h-12 rounded-lg bg-emerald-500/10 flex items-center justify-center flex-shrink-0">
+                <span class="text-2xl">🐳</span>
+              </div>
+              <div>
+                <h3 class="text-lg font-semibold text-white mb-2">Docker Compose Support</h3>
+                <p class="text-slate-400 text-sm">Full Docker Compose automation with volume initialization and directory sync</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="feature-card rounded-xl p-6">
+            <div class="flex items-start gap-4">
+              <div class="w-12 h-12 rounded-lg bg-purple-500/10 flex items-center justify-center flex-shrink-0">
+                <span class="text-2xl">🔒</span>
+              </div>
+              <div>
+                <h3 class="text-lg font-semibold text-white mb-2">Automatic SSL</h3>
+                <p class="text-slate-400 text-sm">Let's Encrypt certificate automation via Traefik ACME</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="feature-card rounded-xl p-6">
+            <div class="flex items-start gap-4">
+              <div class="w-12 h-12 rounded-lg bg-amber-500/10 flex items-center justify-center flex-shrink-0">
+                <span class="text-2xl">🌐</span>
+              </div>
+              <div>
+                <h3 class="text-lg font-semibold text-white mb-2">Cloudflare Integration</h3>
+                <p class="text-slate-400 text-sm">Automatic DNS record creation and management</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="feature-card rounded-xl p-6">
+            <div class="flex items-start gap-4">
+              <div class="w-12 h-12 rounded-lg bg-red-500/10 flex items-center justify-center flex-shrink-0">
+                <span class="text-2xl">🔌</span>
+              </div>
+              <div>
+                <h3 class="text-lg font-semibold text-white mb-2">SSH-Independent</h3>
+                <p class="text-slate-400 text-sm">All remote operations use HTTP API — no SSH required</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="feature-card rounded-xl p-6">
+            <div class="flex items-start gap-4">
+              <div class="w-12 h-12 rounded-lg bg-cyan-500/10 flex items-center justify-center flex-shrink-0">
+                <span class="text-2xl">📊</span>
+              </div>
+              <div>
+                <h3 class="text-lg font-semibold text-white mb-2">Real-time Status</h3>
+                <p class="text-slate-400 text-sm">Actual Docker Compose stack status detection with auto-updating config</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Quick Start Section -->
+      <section class="mb-20">
+        <h2 class="text-3xl font-semibold text-white mb-8">Quick Start</h2>
+        
+        <div class="space-y-6">
+          <div>
+            <h3 class="text-lg font-semibold text-white mb-3">1. Install hotify-cli</h3>
+            <div class="code-block rounded-lg p-4 overflow-x-auto">
+              <code class="text-sm text-green-400">
+                # Download binary<br>
+                curl -L https://github.com/javimosch/hotify-cli/releases/latest/download/hotify-cli -o /usr/local/bin/hotify-cli<br>
+                chmod +x /usr/local/bin/hotify-cli
+              </code>
+            </div>
+          </div>
+
+          <div>
+            <h3 class="text-lg font-semibold text-white mb-3">2. Initialize configuration</h3>
+            <div class="code-block rounded-lg p-4 overflow-x-auto">
+              <code class="text-sm text-green-400">
+                hotify-cli init --token YOUR_CF_TOKEN --domain example.com --email admin@example.com
+              </code>
+            </div>
+          </div>
+
+          <div>
+            <h3 class="text-lg font-semibold text-white mb-3">3. Add an app</h3>
+            <div class="code-block rounded-lg p-4 overflow-x-auto">
+              <code class="text-sm text-green-400">
+                hotify-cli setup --id myapp --name "My App" --domain myapp --port 3000 --cmd "/path/to/app start"
+              </code>
+            </div>
+          </div>
+
+          <div>
+            <h3 class="text-lg font-semibold text-white mb-3">4. Setup DNS and Traefik</h3>
+            <div class="code-block rounded-lg p-4 overflow-x-auto">
+              <code class="text-sm text-green-400">
+                hotify-cli setup-dns --id myapp --ip YOUR_SERVER_IP<br>
+                hotify-cli setup-traefik --id myapp
+              </code>
+            </div>
+          </div>
+
+          <div>
+            <h3 class="text-lg font-semibold text-white mb-3">5. Access your app</h3>
+            <div class="code-block rounded-lg p-4 overflow-x-auto">
+              <code class="text-sm text-green-400">
+                # Your app is now available at:<br>
+                # https://myapp.example.com
+              </code>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Docker Compose Section -->
+      <section class="mb-20">
+        <h2 class="text-3xl font-semibold text-white mb-8">Docker Compose Support</h2>
+        <div class="feature-card rounded-xl p-6">
+          <p class="text-slate-400 mb-6">
+            hotify-cli provides advanced Docker Compose deployment automation with these commands:
+          </p>
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="bg-[#111113] rounded-lg p-4 border border-slate-800">
+              <code class="text-blue-400 font-semibold">deploy-compose</code>
+              <p class="text-slate-500 text-sm mt-2">Copy full project tree to remote compose_path</p>
+            </div>
+            <div class="bg-[#111113] rounded-lg p-4 border border-slate-800">
+              <code class="text-blue-400 font-semibold">compose-sync</code>
+              <p class="text-slate-500 text-sm mt-2">Sync compose file (+ .env) only</p>
+            </div>
+            <div class="bg-[#111113] rounded-lg p-4 border border-slate-800">
+              <code class="text-blue-400 font-semibold">compose-copy-dir</code>
+              <p class="text-slate-500 text-sm mt-2">Copy specific directory to remote compose_path</p>
+            </div>
+            <div class="bg-[#111113] rounded-lg p-4 border border-slate-800">
+              <code class="text-blue-400 font-semibold">volume-init</code>
+              <p class="text-slate-500 text-sm mt-2">Populate Docker named volume with local content</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Documentation Links -->
+      <section class="mb-20">
+        <h2 class="text-3xl font-semibold text-white mb-8">Documentation</h2>
+        <div class="space-y-4">
+          <a href="changelog.html" class="block feature-card rounded-xl p-6 hover:border-blue-500">
+            <div class="flex items-center gap-4">
+              <div class="w-12 h-12 rounded-lg bg-blue-500/10 flex items-center justify-center flex-shrink-0">
+                <span class="text-2xl">📋</span>
+              </div>
+              <div>
+                <h3 class="text-lg font-semibold text-white">Changelog</h3>
+                <p class="text-slate-400 text-sm">View release notes and version history</p>
+              </div>
+            </div>
+          </a>
+          
+          <a href="https://github.com/javimosch/hotify-cli/blob/master/AGENTS.md" target="_blank" class="block feature-card rounded-xl p-6 hover:border-blue-500">
+            <div class="flex items-center gap-4">
+              <div class="w-12 h-12 rounded-lg bg-purple-500/10 flex items-center justify-center flex-shrink-0">
+                <span class="text-2xl">📖</span>
+              </div>
+              <div>
+                <h3 class="text-lg font-semibold text-white">Agent Documentation</h3>
+                <p class="text-slate-400 text-sm">Comprehensive guide for AI agents using hotify-cli</p>
+              </div>
+            </div>
+          </a>
+
+          <a href="https://github.com/javimosch/hotify-cli" target="_blank" class="block feature-card rounded-xl p-6 hover:border-blue-500">
+            <div class="flex items-center gap-4">
+              <div class="w-12 h-12 rounded-lg bg-slate-500/10 flex items-center justify-center flex-shrink-0">
+                <span class="text-2xl">💻</span>
+              </div>
+              <div>
+                <h3 class="text-lg font-semibold text-white">GitHub Repository</h3>
+                <p class="text-slate-400 text-sm">Source code, issues, and contributions</p>
+              </div>
+            </div>
+          </a>
+        </div>
+      </section>
+
+      <!-- Footer -->
+      <footer class="border-t border-slate-800 pt-8 text-center text-slate-500 text-sm">
+        <p>hotify-cli v2.7.1 — MIT License</p>
+        <p class="mt-2">
+          <a href="https://github.com/javimosch/hotify-cli" target="_blank" class="text-blue-400 hover:text-blue-300">GitHub</a> · 
+          <a href="changelog.html" class="text-blue-400 hover:text-blue-300">Changelog</a>
+        </p>
+      </footer>
     </div>
   </body>
 </html>
