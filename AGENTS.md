@@ -1,40 +1,82 @@
-# Hotify CLI - Agent Documentation
+# Hotify CLI - Agent Documentation (v2.0.0)
 
 ## Overview
 Hotify is a CLI+UI tool for managing Traefik/Cloudflare app deployment. It automates DNS setup, SSL certificates, and reverse proxy configuration for web apps.
+
+**Default output is JSON** (machine-readable). Add `--human` for human-readable text.
+
+## v2.0.0 CLI Structure
+
+```
+init          Initialize config (non-interactive in JSON mode, requires --token --domain --email)
+setup         Create or update an app (upsert) — replaces old add/edit
+add           Strict create (fails if ID exists) — legacy compat
+remove        Remove from config (does NOT clean DNS/Traefik — use prune)
+list          List all apps
+
+start [--id]  Start remote app (with --id) or hotify daemon (without --id --daemon)
+stop  [--id]  Stop remote app (SIGTERM) or hotify daemon
+restart --id  Restart remote app
+status [--id] Remote app status or daemon status
+
+deploy        File transfer only: --id --source required
+prune         Cleanup DNS/Traefik: --id <app> or --all
+
+traefik-system  Install/manage Traefik on target
+auth          Authenticate with remote daemon
+targets       Manage deployment targets
+api-keys      Manage API keys
+```
 
 ## Agent Usage
 
 ### Quick Start for Agents
 
-1. **Initialize Configuration** (first time only):
+1. **Initialize Configuration** (non-interactive, agent-friendly):
 ```bash
-hotify-cli init
+hotify-cli init --token <cf-api-token> --domain example.com --email admin@example.com
 ```
-Prompts for:
-- Cloudflare API token (use legacy format)
-- Base domain (e.g., intrane.fr)
-- Admin email (for Let's Encrypt)
+- Returns JSON with `warnings` array (includes Traefik warning if not installed)
+- Use `--human` flag for interactive prompts
 
-2. **Add an App**:
+2. **Setup App** (create or update):
 ```bash
-hotify-cli add \
+hotify-cli setup \
   --id app-id \
   --name "App Name" \
   --domain subdomain \
   --port 3000 \
-  --command "/path/to/binary start" \
-  --source "github.com/user/repo"
+  --cmd "/path/to/binary start"
+```
+- With DNS auto-setup: add `--setup-dns` (IP auto-detected via ifconfig.me)
+- With explicit IP: add `--setup-dns --ip 1.2.3.4`
+- Update only port: `hotify-cli setup --id app-id --port 4000`
+
+3. **Deploy Binary**:
+```bash
+hotify-cli deploy --id app-id --source ./mybinary
+hotify-cli deploy --id app-id --source ./mybinary --setup-dns  # DNS too
 ```
 
-3. **Setup DNS**:
+4. **Start/Stop/Restart**:
 ```bash
-hotify-cli setup-dns --id app-id --ip 92.113.145.178
+hotify-cli start   --id app-id
+hotify-cli stop    --id app-id   # sends SIGTERM
+hotify-cli restart --id app-id
+hotify-cli status  --id app-id
 ```
 
-4. **Setup Traefik**:
+5. **Remove + Cleanup**:
 ```bash
-hotify-cli setup-traefik --id app-id
+hotify-cli remove --id app-id        # removes from config, warns about DNS/Traefik
+hotify-cli prune  --id app-id        # removes Traefik config, warns about DNS
+hotify-cli prune  --all              # rebuilds Traefik for current app list
+```
+
+6. **Setup Traefik**:
+```bash
+hotify-cli traefik-system --target <name>   # install Traefik on target
+hotify-cli traefik-system --status          # check status
 ```
 
 ### CLI Commands for Agents

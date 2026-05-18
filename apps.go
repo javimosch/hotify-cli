@@ -1,0 +1,301 @@
+package main
+
+import (
+	"flag"
+	"fmt"
+	"os"
+)
+
+// setupApp handles both "add" (new) and "setup" (upsert) logic.
+// isUpsert=false enforces unique ID (add), isUpsert=true allows update.
+func setupApp(isUpsert bool) {
+	format := getOutputFormat()
+	config, err := loadConfig()
+	if err != nil {
+		result := CommandResult{
+			Version: Version, Success: false,
+			Error: &CommandError{Code: ExitConfigError, Type: "config_error", Message: err.Error(), Recoverable: false},
+		}
+		printOutput(result, format)
+		os.Exit(ExitConfigError)
+	}
+
+	cmd := flag.NewFlagSet("setup", flag.ExitOnError)
+	id := cmd.String("id", "", "App ID (required)")
+	name := cmd.String("name", "", "App display name")
+	domain := cmd.String("domain", "", "App subdomain")
+	port := cmd.Int("port", 0, "App port")
+	command := cmd.String("cmd", "", "Command to start app")
+	source := cmd.String("source", "", "App source URL or repo (optional metadata)")
+	setupDNS := cmd.Bool("setup-dns", false, "Also create Cloudflare DNS A record after saving")
+	ip := cmd.String("ip", "", "Server IP for DNS (auto-detected if omitted)")
+	cmd.Parse(filterHumanFlag(os.Args[2:]))
+
+	if *id == "" {
+		result := CommandResult{
+			Version: Version, Success: false,
+			Error: &CommandError{
+				Code: ExitInvalidArgument, Type: "validation_error",
+				Message:     "Missing required flag: --id",
+				Recoverable: false,
+				Suggestions: []string{"hotify-cli setup --id <id> --domain <subdomain> --port <port> --cmd <command>"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitInvalidArgument)
+	}
+
+	// Find existing app
+	existingIdx := -1
+	for i, app := range config.Apps {
+		if app.ID == *id {
+			existingIdx = i
+			break
+		}
+	}
+
+	if !isUpsert && existingIdx >= 0 {
+		result := CommandResult{
+			Version: Version, Success: false,
+			Error: &CommandError{
+				Code: ExitInvalidArgument, Type: "duplicate_id",
+				Message:     fmt.Sprintf("App with ID '%s' already exists. Use 'hotify-cli setup' to update it.", *id),
+				Recoverable: false,
+				Suggestions: []string{"hotify-cli setup --id " + *id + " --port <new-port>"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitInvalidArgument)
+	}
+
+	if existingIdx >= 0 {
+		// Update existing app fields selectively
+		app := config.Apps[existingIdx]
+		if *name != "" {
+			app.Name = *name
+		}
+		if *domain != "" {
+			app.Domain = fmt.Sprintf("%s.%s", *domain, config.Domain)
+		}
+		if *port != 0 {
+			app.Port = *port
+		}
+		if *command != "" {
+			app.Command = *command
+		}
+		if *source != "" {
+			app.Source = *source
+		}
+		config.Apps[existingIdx] = app
+	} else {
+		// New app — all required fields must be present
+		if *name == "" || *domain == "" || *port == 0 || *command == "" {
+			result := CommandResult{
+				Version: Version, Success: false,
+				Error: &CommandError{
+					Code: ExitInvalidArgument, Type: "validation_error",
+					Message:     "New app requires --name, --domain, --port, and --cmd",
+					Recoverable: false,
+					Suggestions: []string{"hotify-cli setup --id <id> --name <name> --domain <subdomain> --port <port> --cmd <command>"},
+				},
+			}
+			printOutput(result, format)
+			os.Exit(ExitInvalidArgument)
+		}
+		config.Apps = append(config.Apps, App{
+			ID:      *id,
+			Name:    *name,
+			Domain:  fmt.Sprintf("%s.%s", *domain, config.Domain),
+			Port:    *port,
+			Command: *command,
+			Source:  *source,
+			Status:  "stopped",
+		})
+		existingIdx = len(config.Apps) - 1
+	}
+
+	if err := saveConfig(config); err != nil {
+		result := CommandResult{
+			Version: Version, Success: false,
+			Error: &CommandError{Code: ExitConfigError, Type: "config_error", Message: err.Error(), Recoverable: false},
+		}
+		printOutput(result, format)
+		os.Exit(ExitConfigError)
+	}
+
+	app := config.Apps[existingIdx]
+	warnings := []string{}
+
+	// Optional DNS setup
+	if *setupDNS {
+		resolvedIP, warn, resolveErr := resolveServerIP(*ip)
+		if resolveErr != nil {
+			warnings = append(warnings, fmt.Sprintf("DNS setup skipped: could not determine server IP: %v", resolveErr))
+		} else {
+			if warn != "" {
+				warnings = append(warnings, warn)
+			}
+			zoneID, zErr := getZoneID(app.Domain, config.CloudflareToken, config.AdminEmail)
+			if zErr != nil {
+				warnings = append(warnings, fmt.Sprintf("DNS setup failed (zone lookup): %v", zErr))
+			} else if dnsErr := setupDNSRecord(app.Domain, resolvedIP, zoneID, config.CloudflareToken, config.AdminEmail); dnsErr != nil {
+				warnings = append(warnings, fmt.Sprintf("DNS setup failed: %v", dnsErr))
+			}
+		}
+	}
+
+	result := CommandResult{
+		Version: Version,
+		Success: true,
+		Data: map[string]interface{}{
+			"id":     app.ID,
+			"name":   app.Name,
+			"domain": app.Domain,
+			"port":   app.Port,
+			"cmd":    app.Command,
+		},
+		Metadata: map[string]interface{}{
+			"warnings": warnings,
+		},
+	}
+	printOutput(result, format)
+}
+
+// addApp is the legacy "add" entrypoint (enforces unique ID)
+func addApp() { setupApp(false) }
+
+// editApp is kept for backward compatibility, delegates to upsert
+func editApp() { setupApp(true) }
+
+func removeApp() {
+	format := getOutputFormat()
+	config, err := loadConfig()
+	if err != nil {
+		result := CommandResult{
+			Version: Version, Success: false,
+			Error: &CommandError{Code: ExitConfigError, Type: "config_error", Message: err.Error(), Recoverable: false},
+		}
+		printOutput(result, format)
+		os.Exit(ExitConfigError)
+	}
+
+	removeCmd := flag.NewFlagSet("remove", flag.ExitOnError)
+	id := removeCmd.String("id", "", "App ID (required)")
+	removeCmd.Parse(filterHumanFlag(os.Args[2:]))
+
+	if *id == "" {
+		result := CommandResult{
+			Version: Version, Success: false,
+			Error: &CommandError{
+				Code: ExitInvalidArgument, Type: "validation_error",
+				Message:     "Missing required flag: --id",
+				Recoverable: false,
+				Suggestions: []string{"hotify-cli remove --id <id>"},
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitInvalidArgument)
+	}
+
+	found := false
+	var updatedApps []App
+	for _, app := range config.Apps {
+		if app.ID != *id {
+			updatedApps = append(updatedApps, app)
+		} else {
+			found = true
+		}
+	}
+
+	if !found {
+		result := CommandResult{
+			Version: Version, Success: false,
+			Error: &CommandError{
+				Code: ExitInvalidArgument, Type: "not_found",
+				Message:     fmt.Sprintf("App with ID '%s' not found", *id),
+				Recoverable: false,
+			},
+		}
+		printOutput(result, format)
+		os.Exit(ExitInvalidArgument)
+	}
+
+	config.Apps = updatedApps
+	if err := saveConfig(config); err != nil {
+		result := CommandResult{
+			Version: Version, Success: false,
+			Error: &CommandError{Code: ExitConfigError, Type: "config_error", Message: err.Error(), Recoverable: false},
+		}
+		printOutput(result, format)
+		os.Exit(ExitConfigError)
+	}
+
+	result := CommandResult{
+		Version: Version,
+		Success: true,
+		Data:    map[string]interface{}{"id": *id, "action": "removed"},
+		Metadata: map[string]interface{}{
+			"warnings": []string{
+				"DNS record for this app was NOT removed from Cloudflare",
+				"Traefik routing config was NOT cleaned up",
+				"Run 'hotify-cli prune --id " + *id + "' to remove DNS and Traefik config",
+			},
+		},
+	}
+	printOutput(result, format)
+}
+
+func listApps() {
+	format := getOutputFormat()
+	config, err := loadConfig()
+	if err != nil {
+		result := CommandResult{
+			Version: Version, Success: false,
+			Error: &CommandError{Code: ExitConfigError, Type: "config_error", Message: err.Error(), Recoverable: false},
+		}
+		printOutput(result, format)
+		os.Exit(ExitConfigError)
+	}
+
+	apps := make([]map[string]interface{}, 0, len(config.Apps))
+	for _, app := range config.Apps {
+		apps = append(apps, map[string]interface{}{
+			"id":     app.ID,
+			"name":   app.Name,
+			"domain": app.Domain,
+			"port":   app.Port,
+			"cmd":    app.Command,
+			"source": app.Source,
+			"status": app.Status,
+		})
+	}
+
+	if format == OutputFormatText {
+		if len(apps) == 0 {
+			fmt.Println("No apps configured")
+			return
+		}
+		fmt.Println("Configured Apps:")
+		fmt.Println("================")
+		for _, app := range config.Apps {
+			fmt.Printf("ID: %s\n", app.ID)
+			fmt.Printf("  Name:   %s\n", app.Name)
+			fmt.Printf("  Domain: %s\n", app.Domain)
+			fmt.Printf("  Port:   %d\n", app.Port)
+			fmt.Printf("  Cmd:    %s\n", app.Command)
+			if app.Source != "" {
+				fmt.Printf("  Source: %s\n", app.Source)
+			}
+			fmt.Printf("  Status: %s\n", app.Status)
+			fmt.Println()
+		}
+		return
+	}
+
+	result := CommandResult{
+		Version: Version,
+		Success: true,
+		Data:    map[string]interface{}{"apps": apps, "count": len(apps)},
+	}
+	printOutput(result, format)
+}

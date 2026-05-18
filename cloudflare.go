@@ -69,6 +69,7 @@ func getZoneID(domain, token, email string) (string, error) {
 	return zoneResp.Result[0].ID, nil
 }
 
+// setupDNSRecord creates an A record. zoneID must be provided (use getZoneID first).
 func setupDNSRecord(domain, ip, zoneID, token, email string) error {
 	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/dns_records", zoneID)
 
@@ -142,7 +143,7 @@ func setupDNSForApp(appID, serverIP string) error {
 		return fmt.Errorf("error getting zone ID: %v", err)
 	}
 
-	if err := setupDNSRecord(app.Domain, serverIP, zoneID, config.CloudflareToken, config.AdminEmail); err != nil {
+	if err := setupDNSRecord(app.Domain, serverIP, zoneID, config.CloudflareToken, config.AdminEmail); err != nil { //nolint
 		return fmt.Errorf("error setting up DNS record: %v", err)
 	}
 
