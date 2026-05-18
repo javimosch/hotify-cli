@@ -1262,11 +1262,25 @@ func handleAppStart(w http.ResponseWriter, r *http.Request, app *App) {
 		return
 	}
 
-	// For now, just update status
-	// In full implementation, this would execute the command and track PID
+	// Execute the command
+	cmd := exec.Command("sh", "-c", app.Command)
+	if err := cmd.Start(); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   fmt.Sprintf("Failed to start app: %v", err),
+		})
+		return
+	}
+
+	// Resolve actual daemon PID using two-strategy resolver
+	actualPID := resolveActualPID(cmd.Process.Pid, app.Port)
+
+	// Update config with resolved PID and status
 	config, _ := loadConfig()
 	for i := range config.Apps {
 		if config.Apps[i].ID == app.ID {
+			config.Apps[i].PID = actualPID
 			config.Apps[i].Status = "running"
 			saveConfig(config)
 			break
@@ -1274,16 +1288,18 @@ func handleAppStart(w http.ResponseWriter, r *http.Request, app *App) {
 	}
 
 	auditLogger.LogEvent(AuditEvent{
-		EventType: AuditEventPermissionAdd, // Reuse for now
+		EventType: AuditEventPermissionAdd,
 		TokenName: r.Header.Get("X-API-Key-Name"),
-		Details:   fmt.Sprintf("Started app: %s", app.ID),
+		Details:   fmt.Sprintf("Started app: %s (PID: %d)", app.ID, actualPID),
 		Success:   true,
 	})
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success": true,
-		"status":  "running",
+		"success":    true,
+		"status":     "running",
+		"pid":        actualPID,
+		"shell_pid":  cmd.Process.Pid,
 	})
 }
 
@@ -1294,8 +1310,17 @@ func handleAppStop(w http.ResponseWriter, r *http.Request, app *App) {
 	}
 
 	config, _ := loadConfig()
+	var appPID int
 	for i := range config.Apps {
 		if config.Apps[i].ID == app.ID {
+			appPID = config.Apps[i].PID
+			if appPID > 0 {
+				// Send SIGTERM to the process
+				process, err := os.FindProcess(appPID)
+				if err == nil {
+					process.Signal(syscall.SIGTERM)
+				}
+			}
 			config.Apps[i].Status = "stopped"
 			config.Apps[i].PID = 0
 			saveConfig(config)
@@ -1306,7 +1331,7 @@ func handleAppStop(w http.ResponseWriter, r *http.Request, app *App) {
 	auditLogger.LogEvent(AuditEvent{
 		EventType: AuditEventPermissionAdd,
 		TokenName: r.Header.Get("X-API-Key-Name"),
-		Details:   fmt.Sprintf("Stopped app: %s", app.ID),
+		Details:   fmt.Sprintf("Stopped app: %s (PID: %d)", app.ID, appPID),
 		Success:   true,
 	})
 
@@ -1314,6 +1339,7 @@ func handleAppStop(w http.ResponseWriter, r *http.Request, app *App) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"status":  "stopped",
+		"pid":     appPID,
 	})
 }
 
