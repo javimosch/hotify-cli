@@ -52,7 +52,8 @@ func validateApp(app App) error {
 
 // setupTraefikConfig writes main traefik.yml and cloudflare.env.
 // challengeType controls the ACME challenge method (http or dns).
-func setupTraefikConfig(config *Config, challengeType TraefikChallengeType) error {
+// enableDocker adds the Docker provider for automatic container discovery.
+func setupTraefikConfig(config *Config, challengeType TraefikChallengeType, enableDocker bool) error {
 	if err := validateTraefikConfig(config); err != nil {
 		return fmt.Errorf("configuration validation failed: %v", err)
 	}
@@ -71,6 +72,21 @@ func setupTraefikConfig(config *Config, challengeType TraefikChallengeType) erro
 		// Default: HTTP challenge — simpler and doesn't require CF token scopes
 		challengeBlock = `      httpChallenge:
         entryPoint: web`
+	}
+
+	// Build the providers block
+	providersBlock := `providers:
+  file:
+    filename: /etc/traefik/dynamic.yml
+    watch: true`
+	if enableDocker {
+		providersBlock = `providers:
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false
+  file:
+    filename: /etc/traefik/dynamic.yml
+    watch: true`
 	}
 
 	mainConfig := fmt.Sprintf(`global:
@@ -104,11 +120,8 @@ certificatesResolvers:
       storage: /etc/traefik/acme.json
 %s
 
-providers:
-  file:
-    filename: /etc/traefik/dynamic.yml
-    watch: true
-`, config.AdminEmail, challengeBlock)
+%s
+`, config.AdminEmail, challengeBlock, providersBlock)
 
 	if err := os.WriteFile(traefikMain, []byte(mainConfig), 0644); err != nil {
 		return fmt.Errorf("error writing traefik.yml: %v", err)
@@ -246,11 +259,11 @@ func restartTraefik() error {
 // setupTraefikForApp configures Traefik for a single app (and all current apps).
 // Uses HTTP challenge by default; pass --challenge-type dns to switch.
 func setupTraefikForApp(appID string) error {
-	return setupTraefikForAppWithChallenge(appID, ChallengeHTTP)
+	return setupTraefikForAppWithChallenge(appID, ChallengeHTTP, false)
 }
 
 // setupTraefikForAppWithChallenge is the full path with explicit challenge choice.
-func setupTraefikForAppWithChallenge(appID string, challengeType TraefikChallengeType) error {
+func setupTraefikForAppWithChallenge(appID string, challengeType TraefikChallengeType, enableDocker bool) error {
 	config, err := loadConfig()
 	if err != nil {
 		return err
@@ -273,7 +286,7 @@ func setupTraefikForAppWithChallenge(appID string, challengeType TraefikChalleng
 		return fmt.Errorf("app '%s' not found in configuration", appID)
 	}
 
-	if err := setupTraefikConfig(config, challengeType); err != nil {
+	if err := setupTraefikConfig(config, challengeType, enableDocker); err != nil {
 		return fmt.Errorf("error setting up traefik config: %v", err)
 	}
 
@@ -289,6 +302,58 @@ func setupTraefikForAppWithChallenge(appID string, challengeType TraefikChalleng
 		return fmt.Errorf("error restarting traefik: %v", err)
 	}
 
-	fmt.Printf("✅ Traefik configured for app: %s (challenge: %s)\n", appID, challengeType)
+	dockerNote := ""
+	if enableDocker {
+		dockerNote = " (Docker provider enabled)"
+	}
+	fmt.Printf("✅ Traefik configured for app: %s (challenge: %s)%s\n", appID, challengeType, dockerNote)
+	return nil
+}
+
+// enableDockerProvider adds the Docker provider to Traefik configuration
+func enableDockerProvider() error {
+	config, err := loadConfig()
+	if err != nil {
+		return err
+	}
+
+	if err := validateTraefikConfig(config); err != nil {
+		return err
+	}
+
+	// Use HTTP challenge (default) and enable Docker
+	if err := setupTraefikConfig(config, ChallengeHTTP, true); err != nil {
+		return fmt.Errorf("error setting up traefik config: %v", err)
+	}
+
+	if err := restartTraefik(); err != nil {
+		return fmt.Errorf("error restarting traefik: %v", err)
+	}
+
+	fmt.Println("✅ Docker provider enabled in Traefik")
+	return nil
+}
+
+// disableDockerProvider removes the Docker provider from Traefik configuration
+func disableDockerProvider() error {
+	config, err := loadConfig()
+	if err != nil {
+		return err
+	}
+
+	if err := validateTraefikConfig(config); err != nil {
+		return err
+	}
+
+	// Use HTTP challenge (default) and disable Docker
+	if err := setupTraefikConfig(config, ChallengeHTTP, false); err != nil {
+		return fmt.Errorf("error setting up traefik config: %v", err)
+	}
+
+	if err := restartTraefik(); err != nil {
+		return fmt.Errorf("error restarting traefik: %v", err)
+	}
+
+	fmt.Println("✅ Docker provider disabled in Traefik")
 	return nil
 }

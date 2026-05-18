@@ -5,7 +5,7 @@ import (
 	"os"
 )
 
-const Version = "2.3.0"
+const Version = "2.4.0"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -53,6 +53,10 @@ func main() {
 		handleSetupDNSCLI()
 	case "setup-traefik":
 		handleSetupTraefikCLI()
+
+	// Docker container management
+	case "docker":
+		handleDockerCLI()
 
 	// Infrastructure
 	case "prune":
@@ -109,6 +113,16 @@ func printHelp() {
 	fmt.Println("  setup-dns       Create/update Cloudflare DNS A record for an app")
 	fmt.Println("  setup-traefik   Configure Traefik routing for an app")
 	fmt.Println("                  --challenge-type http|dns  (default: http)")
+	fmt.Println()
+	fmt.Println("Docker:")
+	fmt.Println("  docker list              List all containers")
+	fmt.Println("  docker start <id>       Start a container")
+	fmt.Println("  docker stop <id>        Stop a container")
+	fmt.Println("  docker restart <id>     Restart a container")
+	fmt.Println("  docker status <id>      Container status")
+	fmt.Println("  docker logs <id>        Container logs")
+	fmt.Println("  docker enable-traefik   Enable Traefik Docker provider")
+	fmt.Println("  docker disable-traefik  Disable Traefik Docker provider")
 	fmt.Println()
 	fmt.Println("Cleanup:")
 	fmt.Println("  prune           Remove DNS/Traefik config for an app or globally")

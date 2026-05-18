@@ -118,7 +118,7 @@ func handleSetupTraefikCLI() {
 		os.Exit(ExitInvalidArgument)
 	}
 
-	if err := setupTraefikForAppWithChallenge(*id, ct); err != nil {
+	if err := setupTraefikForAppWithChallenge(*id, ct, false); err != nil {
 		printOutput(CommandResult{
 			Version: Version, Success: false,
 			Error: &CommandError{
