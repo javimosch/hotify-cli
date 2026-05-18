@@ -14,12 +14,12 @@ add           Strict create (fails if ID exists) — legacy compat
 remove        Remove from config (does NOT clean DNS/Traefik — use prune)
 list          List all apps
 
-start [--id]  Start remote app (with --id) or hotify daemon (without --id --daemon)
-stop  [--id]  Stop remote app (SIGTERM) or hotify daemon
-restart --id  Restart remote app
-status [--id] Remote app status or daemon status
-pause  --id    Pause remote app (SIGSTOP)
-resume --id    Resume paused remote app (SIGCONT)
+start [--id]  Start remote app (with --id) or hotify daemon (without --id --daemon). Add --local for local execution.
+stop  [--id]  Stop remote app (SIGTERM) or hotify daemon. Add --local for local execution.
+restart --id  Restart remote app. Add --local for local execution.
+status [--id] Remote app status or daemon status. Add --local for local execution.
+pause  --id    Pause remote app (SIGSTOP). Add --local for local execution.
+resume --id    Resume paused remote app (SIGCONT). Add --local for local execution.
 
 deploy        File transfer only: --id --source required
 prune         Cleanup DNS/Traefik: --id <app> or --all
@@ -62,12 +62,21 @@ hotify-cli deploy --id app-id --source ./mybinary --setup-dns  # DNS too
 
 4. **Start/Stop/Restart**:
 ```bash
+# Remote mode (default - requires target)
 hotify-cli start   --id app-id
 hotify-cli stop    --id app-id   # sends SIGTERM
 hotify-cli restart --id app-id
 hotify-cli status  --id app-id
 hotify-cli pause   --id app-id   # SIGSTOP (freeze)
 hotify-cli resume  --id app-id   # SIGCONT (unfreeze)
+
+# Local mode (execute directly on local server, no target needed)
+hotify-cli start   --id app-id --local
+hotify-cli stop    --id app-id --local
+hotify-cli restart --id app-id --local
+hotify-cli status  --id app-id --local
+hotify-cli pause   --id app-id --local
+hotify-cli resume  --id app-id --local
 ```
 
 5. **Remove + Cleanup**:
@@ -87,12 +96,14 @@ hotify-cli traefik-system --status          # check status
 
 - **Pause** (`SIGSTOP`): Freezes the process without killing it. The app remains in memory but stops consuming CPU.
 - **Resume** (`SIGCONT`): Unfreezes a paused process, resuming execution.
-- **Requirements**: The remote hotify daemon must track the app's PID in the config (`App.PID` field).
+- **Remote Mode**: Requires a configured target. The remote hotify daemon must track the app's PID in the config (`App.PID` field).
+- **Local Mode** (`--local` flag): Execute directly on local server without requiring a target. Reads PID from local config and sends signals directly.
 - **Limitations**:
   - Paused processes still hold memory and file descriptors
   - If the daemon restarts, PID tracking is lost
   - SIGTERM may not work on paused processes (resume first or force-kill)
   - Orphaned PIDs (process died externally) need manual cleanup
+  - Local mode requires the hotify-cli config to be on the same machine as the app
 
 ### CLI Commands for Agents
 

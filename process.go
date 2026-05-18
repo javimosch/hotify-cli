@@ -7,17 +7,23 @@ import (
 	"time"
 )
 
-// handleCLIAppStart handles: hotify-cli start --id <id> [--target <name>]
+// handleCLIAppStart handles: hotify-cli start --id <id> [--target <name>] [--local]
 func handleCLIAppStart() {
 	format := getOutputFormat()
 	startCmd := flag.NewFlagSet("start", flag.ExitOnError)
 	id := startCmd.String("id", "", "App ID to start")
 	target := startCmd.String("target", "", "Target name (uses default if not specified)")
+	local := startCmd.Bool("local", false, "Execute directly on local server")
 	startCmd.Parse(filterHumanFlag(os.Args[2:]))
 
 	if *id == "" {
 		// No --id: fall through to daemon handling in main.go
 		handleDaemonStart()
+		return
+	}
+
+	if *local {
+		handleLocalStart(*id, format)
 		return
 	}
 
@@ -37,17 +43,23 @@ func handleCLIAppStart() {
 	handleRemoteStart(*id, targetObj, format)
 }
 
-// handleCLIAppStop handles: hotify-cli stop --id <id> [--target <name>]
-// Sends SIGTERM via the remote API; the remote server handles SIGKILL fallback.
+// handleCLIAppStop handles: hotify-cli stop --id <id> [--target <name>] [--local]
+// Sends SIGTERM locally (or via remote API)
 func handleCLIAppStop() {
 	format := getOutputFormat()
 	stopCmd := flag.NewFlagSet("stop", flag.ExitOnError)
 	id := stopCmd.String("id", "", "App ID to stop")
 	target := stopCmd.String("target", "", "Target name (uses default if not specified)")
+	local := stopCmd.Bool("local", false, "Execute directly on local server")
 	stopCmd.Parse(filterHumanFlag(os.Args[2:]))
 
 	if *id == "" {
 		stopDaemon()
+		return
+	}
+
+	if *local {
+		handleLocalStop(*id, format)
 		return
 	}
 
@@ -67,35 +79,25 @@ func handleCLIAppStop() {
 	handleRemoteStop(*id, targetObj, format)
 }
 
-// handleCLIAppRestart handles: hotify-cli restart --id <id> [--target <name>]
+// handleCLIAppRestart handles: hotify-cli restart --id <id> [--target <name>] [--local]
 func handleCLIAppRestart() {
 	format := getOutputFormat()
 	restartCmd := flag.NewFlagSet("restart", flag.ExitOnError)
 	id := restartCmd.String("id", "", "App ID to restart")
 	target := restartCmd.String("target", "", "Target name")
+	local := restartCmd.Bool("local", false, "Execute directly on local server")
 	restartCmd.Parse(filterHumanFlag(os.Args[2:]))
 
-	if *id == "" {
-		printOutput(CommandResult{
-			Version: Version, Success: false,
-			Error: &CommandError{
-				Code: ExitInvalidArgument, Type: "validation_error",
-				Message:     "Missing required flag: --id",
-				Recoverable: false,
-				Suggestions: []string{"hotify-cli restart --id <id>"},
-			},
-		}, format)
-		os.Exit(ExitInvalidArgument)
+	if *local {
+		handleLocalRestart(*id, format)
+		return
 	}
 
 	targetObj, err := getActiveTarget(*target)
 	if err != nil {
 		printOutput(CommandResult{
 			Version: Version, Success: false,
-			Error: &CommandError{
-				Code: ExitTargetNotFound, Type: "target_error", Message: err.Error(),
-				Recoverable: false,
-			},
+			Error: &CommandError{Code: ExitTargetNotFound, Type: "target_error", Message: err.Error(), Recoverable: false},
 		}, format)
 		os.Exit(ExitTargetNotFound)
 	}
@@ -103,17 +105,23 @@ func handleCLIAppRestart() {
 	handleRemoteRestart(*id, targetObj, format)
 }
 
-// handleCLIAppStatus handles: hotify-cli status --id <id> [--target <name>]
+// handleCLIAppStatus handles: hotify-cli status --id <id> [--target <name>] [--local]
 // Without --id, shows hotify daemon status.
 func handleCLIAppStatus() {
 	format := getOutputFormat()
 	statusCmd := flag.NewFlagSet("status", flag.ExitOnError)
 	id := statusCmd.String("id", "", "App ID to check")
 	target := statusCmd.String("target", "", "Target name")
+	local := statusCmd.Bool("local", false, "Execute directly on local server")
 	statusCmd.Parse(filterHumanFlag(os.Args[2:]))
 
 	if *id == "" {
 		checkDaemonStatus()
+		return
+	}
+
+	if *local {
+		handleLocalStatus(*id, format)
 		return
 	}
 
@@ -132,12 +140,13 @@ func handleCLIAppStatus() {
 	handleRemoteStatus(*id, targetObj, format)
 }
 
-// handleCLIAppPause handles: hotify-cli pause --id <id> [--target <name>]
+// handleCLIAppPause handles: hotify-cli pause --id <id> [--target <name>] [--local]
 func handleCLIAppPause() {
 	format := getOutputFormat()
 	pauseCmd := flag.NewFlagSet("pause", flag.ExitOnError)
 	id := pauseCmd.String("id", "", "App ID to pause")
 	target := pauseCmd.String("target", "", "Target name")
+	local := pauseCmd.Bool("local", false, "Execute directly on local server (no remote API)")
 	pauseCmd.Parse(filterHumanFlag(os.Args[2:]))
 
 	if *id == "" {
@@ -151,6 +160,11 @@ func handleCLIAppPause() {
 			},
 		}, format)
 		os.Exit(ExitInvalidArgument)
+	}
+
+	if *local {
+		handleLocalPause(*id, format)
+		return
 	}
 
 	targetObj, err := getActiveTarget(*target)
@@ -168,12 +182,13 @@ func handleCLIAppPause() {
 	handleRemotePause(*id, targetObj, format)
 }
 
-// handleCLIAppResume handles: hotify-cli resume --id <id> [--target <name>]
+// handleCLIAppResume handles: hotify-cli resume --id <id> [--target <name>] [--local]
 func handleCLIAppResume() {
 	format := getOutputFormat()
 	resumeCmd := flag.NewFlagSet("resume", flag.ExitOnError)
 	id := resumeCmd.String("id", "", "App ID to resume")
 	target := resumeCmd.String("target", "", "Target name")
+	local := resumeCmd.Bool("local", false, "Execute directly on local server (no remote API)")
 	resumeCmd.Parse(filterHumanFlag(os.Args[2:]))
 
 	if *id == "" {
@@ -187,6 +202,11 @@ func handleCLIAppResume() {
 			},
 		}, format)
 		os.Exit(ExitInvalidArgument)
+	}
+
+	if *local {
+		handleLocalResume(*id, format)
+		return
 	}
 
 	targetObj, err := getActiveTarget(*target)
