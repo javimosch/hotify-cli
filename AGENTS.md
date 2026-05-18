@@ -1,4 +1,4 @@
-# Hotify CLI - Agent Documentation (v2.1.0)
+# Hotify CLI - Agent Documentation (v2.1.1)
 
 ## Overview
 Hotify is a CLI+UI tool for managing Traefik/Cloudflare app deployment. It automates DNS setup, SSL certificates, and reverse proxy configuration for web apps.
