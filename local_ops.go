@@ -1,11 +1,151 @@
 package main
 
 import (
+	"fmt"
+	"io/ioutil"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 )
+
+// findDeepestChild walks /proc to find the leaf-most child of ppid that is
+// still alive. Returns ppid itself if no children are found.
+// This resolves the PID of a daemon that forks off the shell process.
+func findDeepestChild(ppid int) int {
+	entries, err := ioutil.ReadDir("/proc")
+	if err != nil {
+		return ppid
+	}
+
+	// Build map: parent -> children
+	children := map[int][]int{}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		pid, err := strconv.Atoi(e.Name())
+		if err != nil {
+			continue
+		}
+		statPath := filepath.Join("/proc", e.Name(), "stat")
+		data, err := ioutil.ReadFile(statPath)
+		if err != nil {
+			continue
+		}
+		// stat format: pid (comm) state ppid ...
+		// find closing ')' to skip comm which may contain spaces
+		s := string(data)
+		idx := strings.LastIndex(s, ")")
+		if idx < 0 {
+			continue
+		}
+		fields := strings.Fields(s[idx+1:])
+		if len(fields) < 2 {
+			continue
+		}
+		parentPID, err := strconv.Atoi(fields[1])
+		if err != nil {
+			continue
+		}
+		children[parentPID] = append(children[parentPID], pid)
+	}
+
+	// Walk down to the deepest single child
+	current := ppid
+	for {
+		kids := children[current]
+		if len(kids) == 0 {
+			return current
+		}
+		if len(kids) == 1 {
+			current = kids[0]
+			continue
+		}
+		// Multiple children: pick the one with the highest PID (latest spawned)
+		best := kids[0]
+		for _, k := range kids[1:] {
+			if k > best {
+				best = k
+			}
+		}
+		current = best
+		break
+	}
+	return current
+}
+
+// resolveActualPID returns the real daemon PID after a fork chain.
+// Strategy 1: walk /proc tree (works for single-fork processes).
+// Strategy 2: port-based lookup via ss (works for double-fork/setsid daemons).
+// Falls back to shellPID if neither resolves.
+func resolveActualPID(shellPID int, port int) int {
+	// Give the process time to fork and bind
+	time.Sleep(300 * time.Millisecond)
+
+	// Strategy 1: /proc tree walk (single-fork case)
+	actual := findDeepestChild(shellPID)
+	if actual != shellPID && pidExists(actual) {
+		return actual
+	}
+
+	// Strategy 2: port-based lookup (double-fork/setsid daemons like cmdcenter)
+	if port > 0 {
+		if pid := findPIDByPort(port); pid > 0 {
+			return pid
+		}
+	}
+
+	// Fallback: return shell PID and let the caller deal with it
+	return shellPID
+}
+
+// findPIDByPort uses ss to find the PID listening on a given TCP port
+func findPIDByPort(port int) int {
+	out, err := exec.Command("ss", "-tlnp", fmt.Sprintf("sport = :%d", port)).Output()
+	if err != nil {
+		return 0
+	}
+	// Parse: users:(("name",pid=12345,fd=3))
+	s := string(out)
+	pidMarker := "pid="
+	idx := strings.Index(s, pidMarker)
+	if idx < 0 {
+		return 0
+	}
+	rest := s[idx+len(pidMarker):]
+	end := strings.IndexAny(rest, ",)")
+	if end < 0 {
+		return 0
+	}
+	pid, err := strconv.Atoi(rest[:end])
+	if err != nil {
+		return 0
+	}
+	return pid
+}
+
+// pidExists checks whether a given PID is alive
+func pidExists(pid int) bool {
+	p, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	return p.Signal(syscall.Signal(0)) == nil
+}
+
+// readPIDFile tries to read a PID from a .pid file written by the app.
+// Convention: /tmp/<appID>.pid
+func readPIDFile(appID string) (int, error) {
+	data, err := ioutil.ReadFile(fmt.Sprintf("/tmp/%s.pid", appID))
+	if err != nil {
+		return 0, err
+	}
+	return strconv.Atoi(strings.TrimSpace(string(data)))
+}
 
 // handleLocalStart starts an app locally by executing its command and tracking PID
 func handleLocalStart(appID string, format OutputFormat) {
@@ -44,10 +184,14 @@ func handleLocalStart(appID string, format OutputFormat) {
 		os.Exit(ExitGenericFailure)
 	}
 
-	// Update config with PID and status
+	// Resolve actual daemon PID: the shell may fork the real process
+	// and exit immediately. Use /proc tree walk then port-based fallback.
+	actualPID := resolveActualPID(cmd.Process.Pid, app.Port)
+
+	// Update config with resolved PID and status
 	for i := range config.Apps {
 		if config.Apps[i].ID == appID {
-			config.Apps[i].PID = cmd.Process.Pid
+			config.Apps[i].PID = actualPID
 			config.Apps[i].Status = "running"
 			saveConfig(config)
 			break
@@ -56,7 +200,7 @@ func handleLocalStart(appID string, format OutputFormat) {
 
 	printOutput(CommandResult{
 		Version: Version, Success: true,
-		Data:    map[string]interface{}{"app_id": appID, "status": "running", "pid": cmd.Process.Pid},
+		Data:    map[string]interface{}{"app_id": appID, "status": "running", "pid": actualPID, "shell_pid": cmd.Process.Pid},
 		Metadata: map[string]interface{}{"timestamp": time.Now().Unix()},
 	}, format)
 }
