@@ -1,11 +1,11 @@
-# Hotify CLI - Agent Documentation (v2.1.2)
+# Hotify CLI - Agent Documentation (v2.3.0)
 
 ## Overview
 Hotify is a CLI+UI tool for managing Traefik/Cloudflare app deployment. It automates DNS setup, SSL certificates, and reverse proxy configuration for web apps.
 
 **Default output is JSON** (machine-readable). Add `--human` for human-readable text.
 
-## v2.1.0 CLI Structure
+## v2.3.0 CLI Structure
 
 ```
 init          Initialize config (non-interactive in JSON mode, requires --token --domain --email)
@@ -22,6 +22,15 @@ pause  --id    Pause remote app (SIGSTOP). Add --local for local execution.
 resume --id    Resume paused remote app (SIGCONT). Add --local for local execution.
 
 deploy        File transfer only: --id --source required
+
+setup-dns     Create/update Cloudflare DNS A record: --id --ip (auto-detected if omitted)
+              TC4: checks for existing record — skips if IP matches, updates if IP differs
+setup-traefik Configure Traefik routing for an app: --id [--challenge-type http|dns]
+              TC1: generates explicit domain spec in dynamic.yml (no more ACME errors)
+              TC2: --challenge-type selects HTTP (default, simpler) or DNS challenge
+              TC3: uses restart (not reload) — works even when reload is unsupported
+              TC5: validates config before touching any Traefik files
+
 prune         Cleanup DNS/Traefik: --id <app> or --all
 
 traefik-system  Install/manage Traefik on target

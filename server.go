@@ -748,7 +748,8 @@ func handleSetupTraefikAPI(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var payload struct {
-		ID string `json:"id"`
+		ID            string `json:"id"`
+		ChallengeType string `json:"challenge_type"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
@@ -756,7 +757,12 @@ func handleSetupTraefikAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := setupTraefikForApp(payload.ID); err != nil {
+	ct := ChallengeHTTP
+	if payload.ChallengeType == "dns" {
+		ct = ChallengeDNS
+	}
+
+	if err := setupTraefikForAppWithChallenge(payload.ID, ct); err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
 		return

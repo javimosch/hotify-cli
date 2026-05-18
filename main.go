@@ -5,7 +5,7 @@ import (
 	"os"
 )
 
-const Version = "2.1.2"
+const Version = "2.3.0"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -47,6 +47,12 @@ func main() {
 	// File deployment
 	case "deploy":
 		handleDeploy()
+
+	// Traefik/DNS configuration
+	case "setup-dns":
+		handleSetupDNSCLI()
+	case "setup-traefik":
+		handleSetupTraefikCLI()
 
 	// Infrastructure
 	case "prune":
@@ -98,6 +104,11 @@ func printHelp() {
 	fmt.Println()
 	fmt.Println("Deployment:")
 	fmt.Println("  deploy          Upload binary/folder to remote target")
+	fmt.Println()
+	fmt.Println("DNS & Traefik:")
+	fmt.Println("  setup-dns       Create/update Cloudflare DNS A record for an app")
+	fmt.Println("  setup-traefik   Configure Traefik routing for an app")
+	fmt.Println("                  --challenge-type http|dns  (default: http)")
 	fmt.Println()
 	fmt.Println("Cleanup:")
 	fmt.Println("  prune           Remove DNS/Traefik config for an app or globally")
