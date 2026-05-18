@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>hotify-cli - Traefik/Cloudflare App Management CLI</title>
+    <title>hotify-cli - Coolify for No-Humans</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
     <style>
@@ -12,15 +12,19 @@
       .feature-card { background: linear-gradient(135deg, #1a1a1d 0%, #151517 100%); border: 1px solid #262629; transition: all 0.3s ease; }
       .feature-card:hover { border-color: #3b82f6; transform: translateY(-2px); }
       .code-block { background: #111113; border: 1px solid #262629; }
+      .badge { background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); }
     </style>
   </head>
   <body class="bg-[#0a0a0b] min-h-screen">
     <div class="max-w-5xl mx-auto px-6 py-16">
       <!-- Hero Section -->
       <header class="text-center mb-20">
+        <div class="badge inline-block px-4 py-1.5 rounded-full text-sm font-semibold text-white mb-6">
+          Coolify for No-Humans
+        </div>
         <h1 class="text-6xl font-bold text-white tracking-tight mb-4">hotify-cli</h1>
         <p class="text-xl text-slate-400 max-w-2xl mx-auto mb-8">
-          Traefik/Cloudflare app management CLI — deploy web apps behind Traefik with Cloudflare DNS and Let's Encrypt SSL certificates
+          Self-hosted PaaS automation for agents — CLI-first deployment with Traefik, Cloudflare DNS, and Let's Encrypt SSL
         </p>
         <div class="flex gap-4 justify-center">
           <a href="changelog.html" class="inline-block px-6 py-3 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 transition-all">
@@ -35,16 +39,16 @@
 
       <!-- Features Section -->
       <section class="mb-20">
-        <h2 class="text-3xl font-semibold text-white mb-8">Key Features</h2>
+        <h2 class="text-3xl font-semibold text-white mb-8">Why "Coolify for No-Humans"?</h2>
         <div class="grid md:grid-cols-2 gap-6">
           <div class="feature-card rounded-xl p-6">
             <div class="flex items-start gap-4">
               <div class="w-12 h-12 rounded-lg bg-blue-500/10 flex items-center justify-center flex-shrink-0">
-                <span class="text-2xl">🚀</span>
+                <span class="text-2xl">🤖</span>
               </div>
               <div>
-                <h3 class="text-lg font-semibold text-white mb-2">One-Command Deployment</h3>
-                <p class="text-slate-400 text-sm">Deploy apps with automatic DNS setup, SSL certificates, and reverse proxy configuration</p>
+                <h3 class="text-lg font-semibold text-white mb-2">Agent-First Design</h3>
+                <p class="text-slate-400 text-sm">Built for AI agents and automation — JSON output by default, no human GUI required</p>
               </div>
             </div>
           </div>
@@ -52,11 +56,11 @@
           <div class="feature-card rounded-xl p-6">
             <div class="flex items-start gap-4">
               <div class="w-12 h-12 rounded-lg bg-emerald-500/10 flex items-center justify-center flex-shrink-0">
-                <span class="text-2xl">🐳</span>
+                <span class="text-2xl">⚡</span>
               </div>
               <div>
-                <h3 class="text-lg font-semibold text-white mb-2">Docker Compose Support</h3>
-                <p class="text-slate-400 text-sm">Full Docker Compose automation with volume initialization and directory sync</p>
+                <h3 class="text-lg font-semibold text-white mb-2">CLI-Native Operations</h3>
+                <p class="text-slate-400 text-sm">Every operation available via CLI — perfect for scripts, CI/CD, and agent workflows</p>
               </div>
             </div>
           </div>
@@ -64,11 +68,11 @@
           <div class="feature-card rounded-xl p-6">
             <div class="flex items-start gap-4">
               <div class="w-12 h-12 rounded-lg bg-purple-500/10 flex items-center justify-center flex-shrink-0">
-                <span class="text-2xl">🔒</span>
+                <span class="text-2xl">🔄</span>
               </div>
               <div>
-                <h3 class="text-lg font-semibold text-white mb-2">Automatic SSL</h3>
-                <p class="text-slate-400 text-sm">Let's Encrypt certificate automation via Traefik ACME</p>
+                <h3 class="text-lg font-semibold text-white mb-2">Full Automation</h3>
+                <p class="text-slate-400 text-sm">Deploy apps without human intervention — DNS, SSL, and reverse proxy on autopilot</p>
               </div>
             </div>
           </div>
@@ -76,11 +80,11 @@
           <div class="feature-card rounded-xl p-6">
             <div class="flex items-start gap-4">
               <div class="w-12 h-12 rounded-lg bg-amber-500/10 flex items-center justify-center flex-shrink-0">
-                <span class="text-2xl">🌐</span>
+                <span class="text-2xl">🔌</span>
               </div>
               <div>
-                <h3 class="text-lg font-semibold text-white mb-2">Cloudflare Integration</h3>
-                <p class="text-slate-400 text-sm">Automatic DNS record creation and management</p>
+                <h3 class="text-lg font-semibold text-white mb-2">API-First Architecture</h3>
+                <p class="text-slate-400 text-sm">HTTP API for all remote operations — SSH-free, agent-friendly, cloud-native</p>
               </div>
             </div>
           </div>
@@ -88,11 +92,11 @@
           <div class="feature-card rounded-xl p-6">
             <div class="flex items-start gap-4">
               <div class="w-12 h-12 rounded-lg bg-red-500/10 flex items-center justify-center flex-shrink-0">
-                <span class="text-2xl">🔌</span>
+                <span class="text-2xl">🐳</span>
               </div>
               <div>
-                <h3 class="text-lg font-semibold text-white mb-2">SSH-Independent</h3>
-                <p class="text-slate-400 text-sm">All remote operations use HTTP API — no SSH required</p>
+                <h3 class="text-lg font-semibold text-white mb-2">Docker Compose Native</h3>
+                <p class="text-slate-400 text-sm">First-class Docker Compose support — deploy stacks, sync files, init volumes automatically</p>
               </div>
             </div>
           </div>
@@ -100,21 +104,89 @@
           <div class="feature-card rounded-xl p-6">
             <div class="flex items-start gap-4">
               <div class="w-12 h-12 rounded-lg bg-cyan-500/10 flex items-center justify-center flex-shrink-0">
-                <span class="text-2xl">📊</span>
+                <span class="text-2xl">🎯</span>
               </div>
               <div>
-                <h3 class="text-lg font-semibold text-white mb-2">Real-time Status</h3>
-                <p class="text-slate-400 text-sm">Actual Docker Compose stack status detection with auto-updating config</p>
+                <h3 class="text-lg font-semibold text-white mb-2">Programmatic Everything</h3>
+                <p class="text-slate-400 text-sm">Status detection, process management, and monitoring — all scriptable and queryable</p>
               </div>
             </div>
           </div>
         </div>
       </section>
 
+      <!-- Comparison Section -->
+      <section class="mb-20">
+        <h2 class="text-3xl font-semibold text-white mb-8">Coolify vs hotify-cli</h2>
+        <div class="grid md:grid-cols-2 gap-8">
+          <div class="feature-card rounded-xl p-6">
+            <h3 class="text-xl font-semibold text-white mb-4 flex items-center gap-2">
+              <span>🖥️</span> Coolify (GUI-First)
+            </h3>
+            <ul class="space-y-3 text-slate-400 text-sm">
+              <li class="flex items-start gap-2">
+                <span class="text-slate-500">•</span>
+                <span>Web-based dashboard for human interaction</span>
+              </li>
+              <li class="flex items-start gap-2">
+                <span class="text-slate-500">•</span>
+                <span>Click-through deployment workflows</span>
+              </li>
+              <li class="flex items-start gap-2">
+                <span class="text-slate-500">•</span>
+                <span>Visual configuration management</span>
+              </li>
+              <li class="flex items-start gap-2">
+                <span class="text-slate-500">•</span>
+                <span>Manual SSL certificate management</span>
+              </li>
+              <li class="flex items-start gap-2">
+                <span class="text-slate-500">•</span>
+                <span>Human-centric monitoring and alerts</span>
+              </li>
+            </ul>
+          </div>
+
+          <div class="feature-card rounded-xl p-6 border-blue-500/30">
+            <h3 class="text-xl font-semibold text-white mb-4 flex items-center gap-2">
+              <span>🤖</span> hotify-cli (Agent-First)
+            </h3>
+            <ul class="space-y-3 text-slate-400 text-sm">
+              <li class="flex items-start gap-2">
+                <span class="text-blue-400">✓</span>
+                <span>CLI-first with JSON output for automation</span>
+              </li>
+              <li class="flex items-start gap-2">
+                <span class="text-blue-400">✓</span>
+                <span>One-command deployment via scripts/agents</span>
+              </li>
+              <li class="flex items-start gap-2">
+                <span class="text-blue-400">✓</span>
+                <span>Programmatic configuration via CLI/API</span>
+              </li>
+              <li class="flex items-start gap-2">
+                <span class="text-blue-400">✓</span>
+                <span>Automatic SSL via Traefik ACME</span>
+              </li>
+              <li class="flex items-start gap-2">
+                <span class="text-blue-400">✓</span>
+                <span>Agent-friendly status detection and monitoring</span>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
       <!-- Quick Start Section -->
       <section class="mb-20">
-        <h2 class="text-3xl font-semibold text-white mb-8">Quick Start</h2>
-        
+        <h2 class="text-3xl font-semibold text-white mb-8">Agent Quick Start</h2>
+
+        <div class="feature-card rounded-xl p-6 mb-6">
+          <p class="text-slate-400">
+            Deploy apps programmatically with JSON output — perfect for AI agents, CI/CD pipelines, and automation scripts.
+          </p>
+        </div>
+
         <div class="space-y-6">
           <div>
             <h3 class="text-lg font-semibold text-white mb-3">1. Install hotify-cli</h3>
@@ -128,39 +200,41 @@
           </div>
 
           <div>
-            <h3 class="text-lg font-semibold text-white mb-3">2. Initialize configuration</h3>
+            <h3 class="text-lg font-semibold text-white mb-3">2. Initialize configuration (JSON output)</h3>
             <div class="code-block rounded-lg p-4 overflow-x-auto">
               <code class="text-sm text-green-400">
-                hotify-cli init --token YOUR_CF_TOKEN --domain example.com --email admin@example.com
+                hotify-cli init --token YOUR_CF_TOKEN --domain example.com --email admin@example.com<br>
+                # Returns: {"success":true,"data":{...}}
               </code>
             </div>
           </div>
 
           <div>
-            <h3 class="text-lg font-semibold text-white mb-3">3. Add an app</h3>
+            <h3 class="text-lg font-semibold text-white mb-3">3. Add an app (programmatic)</h3>
             <div class="code-block rounded-lg p-4 overflow-x-auto">
               <code class="text-sm text-green-400">
-                hotify-cli setup --id myapp --name "My App" --domain myapp --port 3000 --cmd "/path/to/app start"
+                hotify-cli setup --id myapp --name "My App" --domain myapp --port 3000 --cmd "/path/to/app start"<br>
+                # Returns: {"success":true,"data":{"app_id":"myapp",...}}
               </code>
             </div>
           </div>
 
           <div>
-            <h3 class="text-lg font-semibold text-white mb-3">4. Setup DNS and Traefik</h3>
+            <h3 class="text-lg font-semibold text-white mb-3">4. Deploy and configure (one-liner)</h3>
             <div class="code-block rounded-lg p-4 overflow-x-auto">
               <code class="text-sm text-green-400">
-                hotify-cli setup-dns --id myapp --ip YOUR_SERVER_IP<br>
-                hotify-cli setup-traefik --id myapp
+                hotify-cli deploy --id myapp --source ./myapp-binary && hotify-cli setup-dns --id myapp --ip YOUR_IP && hotify-cli setup-traefik --id myapp<br>
+                # All commands return JSON for programmatic parsing
               </code>
             </div>
           </div>
 
           <div>
-            <h3 class="text-lg font-semibold text-white mb-3">5. Access your app</h3>
+            <h3 class="text-lg font-semibold text-white mb-3">5. Monitor status (JSON)</h3>
             <div class="code-block rounded-lg p-4 overflow-x-auto">
               <code class="text-sm text-green-400">
-                # Your app is now available at:<br>
-                # https://myapp.example.com
+                hotify-cli status --id myapp<br>
+                # Returns: {"success":true,"data":{"app_id":"myapp","status":"running","pid":12345}}
               </code>
             </div>
           </div>
