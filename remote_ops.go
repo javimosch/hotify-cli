@@ -162,3 +162,81 @@ func handleRemoteStatus(appID string, target *Remote, format OutputFormat) {
 		Metadata: map[string]interface{}{"timestamp": time.Now().Unix()},
 	}, format)
 }
+
+func handleRemotePause(appID string, target *Remote, format OutputFormat) {
+	if format == OutputFormatText {
+		fmt.Printf("Pausing app %s on target %s (SIGSTOP)\n", appID, target.Name)
+	}
+
+	client, err := NewDeploymentClient(target)
+	if err != nil {
+		printOutput(CommandResult{
+			Version: Version, Success: false,
+			Error: &CommandError{
+				Code: ExitGenericFailure, Type: "client_error",
+				Message:     fmt.Sprintf("Error creating deployment client: %v", err),
+				Recoverable: false,
+				Suggestions: []string{"Check target configuration", "Verify authentication token"},
+			},
+		}, format)
+		os.Exit(ExitGenericFailure)
+	}
+
+	if err := client.PauseApp(appID); err != nil {
+		printOutput(CommandResult{
+			Version: Version, Success: false,
+			Error: &CommandError{
+				Code: ExitGenericFailure, Type: "pause_error",
+				Message:     fmt.Sprintf("Failed to pause app: %v", err),
+				Recoverable: true,
+				Suggestions: []string{"Check if app is running", "Verify PID tracking"},
+			},
+		}, format)
+		os.Exit(ExitGenericFailure)
+	}
+
+	printOutput(CommandResult{
+		Version: Version, Success: true,
+		Data: map[string]interface{}{"app_id": appID, "target": target.Name, "action": "pause", "status": "paused", "signal": "SIGSTOP"},
+		Metadata: map[string]interface{}{"timestamp": time.Now().Unix()},
+	}, format)
+}
+
+func handleRemoteResume(appID string, target *Remote, format OutputFormat) {
+	if format == OutputFormatText {
+		fmt.Printf("Resuming app %s on target %s (SIGCONT)\n", appID, target.Name)
+	}
+
+	client, err := NewDeploymentClient(target)
+	if err != nil {
+		printOutput(CommandResult{
+			Version: Version, Success: false,
+			Error: &CommandError{
+				Code: ExitGenericFailure, Type: "client_error",
+				Message:     fmt.Sprintf("Error creating deployment client: %v", err),
+				Recoverable: false,
+				Suggestions: []string{"Check target configuration", "Verify authentication token"},
+			},
+		}, format)
+		os.Exit(ExitGenericFailure)
+	}
+
+	if err := client.ResumeApp(appID); err != nil {
+		printOutput(CommandResult{
+			Version: Version, Success: false,
+			Error: &CommandError{
+				Code: ExitGenericFailure, Type: "resume_error",
+				Message:     fmt.Sprintf("Failed to resume app: %v", err),
+				Recoverable: true,
+				Suggestions: []string{"Check if app is paused", "Verify PID tracking"},
+			},
+		}, format)
+		os.Exit(ExitGenericFailure)
+	}
+
+	printOutput(CommandResult{
+		Version: Version, Success: true,
+		Data: map[string]interface{}{"app_id": appID, "target": target.Name, "action": "resume", "status": "running", "signal": "SIGCONT"},
+		Metadata: map[string]interface{}{"timestamp": time.Now().Unix()},
+	}, format)
+}

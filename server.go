@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -1246,6 +1247,10 @@ func handleAppManagementAPI(w http.ResponseWriter, r *http.Request) {
 		handleAppStatus(w, r, app)
 	case "logs":
 		handleAppLogs(w, r, app)
+	case "pause":
+		handleAppPause(w, r, app)
+	case "resume":
+		handleAppResume(w, r, app)
 	default:
 		http.Error(w, "Unknown action", http.StatusBadRequest)
 	}
@@ -1369,5 +1374,97 @@ func handleAppLogs(w http.ResponseWriter, r *http.Request, app *App) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"app_id": app.ID,
 		"logs":   []string{},
+	})
+}
+
+func handleAppPause(w http.ResponseWriter, r *http.Request, app *App) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if app.PID == 0 || app.Status != "running" {
+		http.Error(w, "App is not running", http.StatusBadRequest)
+		return
+	}
+
+	process, err := os.FindProcess(app.PID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to find process: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if err := process.Signal(syscall.SIGSTOP); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to pause process: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	config, _ := loadConfig()
+	for i := range config.Apps {
+		if config.Apps[i].ID == app.ID {
+			config.Apps[i].Status = "paused"
+			saveConfig(config)
+			break
+		}
+	}
+
+	auditLogger.LogEvent(AuditEvent{
+		EventType: AuditEventPermissionAdd,
+		TokenName: r.Header.Get("X-API-Key-Name"),
+		Details:   fmt.Sprintf("Paused app: %s (PID %d)", app.ID, app.PID),
+		Success:   true,
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"status":  "paused",
+		"pid":     app.PID,
+	})
+}
+
+func handleAppResume(w http.ResponseWriter, r *http.Request, app *App) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if app.PID == 0 || app.Status != "paused" {
+		http.Error(w, "App is not paused", http.StatusBadRequest)
+		return
+	}
+
+	process, err := os.FindProcess(app.PID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to find process: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if err := process.Signal(syscall.SIGCONT); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to resume process: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	config, _ := loadConfig()
+	for i := range config.Apps {
+		if config.Apps[i].ID == app.ID {
+			config.Apps[i].Status = "running"
+			saveConfig(config)
+			break
+		}
+	}
+
+	auditLogger.LogEvent(AuditEvent{
+		EventType: AuditEventPermissionAdd,
+		TokenName: r.Header.Get("X-API-Key-Name"),
+		Details:   fmt.Sprintf("Resumed app: %s (PID %d)", app.ID, app.PID),
+		Success:   true,
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"status":  "running",
+		"pid":     app.PID,
 	})
 }

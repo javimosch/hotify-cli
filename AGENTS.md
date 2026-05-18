@@ -1,11 +1,11 @@
-# Hotify CLI - Agent Documentation (v2.0.0)
+# Hotify CLI - Agent Documentation (v2.1.0)
 
 ## Overview
 Hotify is a CLI+UI tool for managing Traefik/Cloudflare app deployment. It automates DNS setup, SSL certificates, and reverse proxy configuration for web apps.
 
 **Default output is JSON** (machine-readable). Add `--human` for human-readable text.
 
-## v2.0.0 CLI Structure
+## v2.1.0 CLI Structure
 
 ```
 init          Initialize config (non-interactive in JSON mode, requires --token --domain --email)
@@ -18,6 +18,8 @@ start [--id]  Start remote app (with --id) or hotify daemon (without --id --daem
 stop  [--id]  Stop remote app (SIGTERM) or hotify daemon
 restart --id  Restart remote app
 status [--id] Remote app status or daemon status
+pause  --id    Pause remote app (SIGSTOP)
+resume --id    Resume paused remote app (SIGCONT)
 
 deploy        File transfer only: --id --source required
 prune         Cleanup DNS/Traefik: --id <app> or --all
@@ -64,6 +66,8 @@ hotify-cli start   --id app-id
 hotify-cli stop    --id app-id   # sends SIGTERM
 hotify-cli restart --id app-id
 hotify-cli status  --id app-id
+hotify-cli pause   --id app-id   # SIGSTOP (freeze)
+hotify-cli resume  --id app-id   # SIGCONT (unfreeze)
 ```
 
 5. **Remove + Cleanup**:
@@ -78,6 +82,17 @@ hotify-cli prune  --all              # rebuilds Traefik for current app list
 hotify-cli traefik-system --target <name>   # install Traefik on target
 hotify-cli traefik-system --status          # check status
 ```
+
+### Pause/Resume Behavior
+
+- **Pause** (`SIGSTOP`): Freezes the process without killing it. The app remains in memory but stops consuming CPU.
+- **Resume** (`SIGCONT`): Unfreezes a paused process, resuming execution.
+- **Requirements**: The remote hotify daemon must track the app's PID in the config (`App.PID` field).
+- **Limitations**:
+  - Paused processes still hold memory and file descriptors
+  - If the daemon restarts, PID tracking is lost
+  - SIGTERM may not work on paused processes (resume first or force-kill)
+  - Orphaned PIDs (process died externally) need manual cleanup
 
 ### CLI Commands for Agents
 

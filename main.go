@@ -5,7 +5,7 @@ import (
 	"os"
 )
 
-const Version = "2.0.0"
+const Version = "2.1.0"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -39,6 +39,10 @@ func main() {
 		handleCLIAppRestart()
 	case "status":
 		handleCLIAppStatus()
+	case "pause":
+		handleCLIAppPause()
+	case "resume":
+		handleCLIAppResume()
 
 	// File deployment
 	case "deploy":
@@ -89,6 +93,8 @@ func printHelp() {
 	fmt.Println("  stop            Stop app or hotify daemon")
 	fmt.Println("  restart         Restart app (requires --id)")
 	fmt.Println("  status          App or daemon status")
+	fmt.Println("  pause           Pause app (SIGSTOP, requires --id)")
+	fmt.Println("  resume          Resume paused app (SIGCONT, requires --id)")
 	fmt.Println()
 	fmt.Println("Deployment:")
 	fmt.Println("  deploy          Upload binary/folder to remote target")
@@ -121,10 +127,12 @@ func printHelp() {
 	fmt.Println("  hotify-cli deploy --id myapp --source ./myapp-binary --setup-dns")
 	fmt.Println()
 	fmt.Println("  # Process management")
-	fmt.Println("  hotify-cli start --id myapp")
-	fmt.Println("  hotify-cli stop  --id myapp")
+	fmt.Println("  hotify-cli start   --id myapp")
+	fmt.Println("  hotify-cli stop    --id myapp")
 	fmt.Println("  hotify-cli restart --id myapp")
-	fmt.Println("  hotify-cli status --id myapp")
+	fmt.Println("  hotify-cli status  --id myapp")
+	fmt.Println("  hotify-cli pause   --id myapp")
+	fmt.Println("  hotify-cli resume  --id myapp")
 	fmt.Println()
 	fmt.Println("  # Hotify daemon")
 	fmt.Println("  hotify-cli start --daemon")

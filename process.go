@@ -132,6 +132,78 @@ func handleCLIAppStatus() {
 	handleRemoteStatus(*id, targetObj, format)
 }
 
+// handleCLIAppPause handles: hotify-cli pause --id <id> [--target <name>]
+func handleCLIAppPause() {
+	format := getOutputFormat()
+	pauseCmd := flag.NewFlagSet("pause", flag.ExitOnError)
+	id := pauseCmd.String("id", "", "App ID to pause")
+	target := pauseCmd.String("target", "", "Target name")
+	pauseCmd.Parse(filterHumanFlag(os.Args[2:]))
+
+	if *id == "" {
+		printOutput(CommandResult{
+			Version: Version, Success: false,
+			Error: &CommandError{
+				Code: ExitInvalidArgument, Type: "validation_error",
+				Message:     "Missing required flag: --id",
+				Recoverable: false,
+				Suggestions: []string{"hotify-cli pause --id <id>"},
+			},
+		}, format)
+		os.Exit(ExitInvalidArgument)
+	}
+
+	targetObj, err := getActiveTarget(*target)
+	if err != nil {
+		printOutput(CommandResult{
+			Version: Version, Success: false,
+			Error: &CommandError{
+				Code: ExitTargetNotFound, Type: "target_error", Message: err.Error(),
+				Recoverable: false,
+			},
+		}, format)
+		os.Exit(ExitTargetNotFound)
+	}
+
+	handleRemotePause(*id, targetObj, format)
+}
+
+// handleCLIAppResume handles: hotify-cli resume --id <id> [--target <name>]
+func handleCLIAppResume() {
+	format := getOutputFormat()
+	resumeCmd := flag.NewFlagSet("resume", flag.ExitOnError)
+	id := resumeCmd.String("id", "", "App ID to resume")
+	target := resumeCmd.String("target", "", "Target name")
+	resumeCmd.Parse(filterHumanFlag(os.Args[2:]))
+
+	if *id == "" {
+		printOutput(CommandResult{
+			Version: Version, Success: false,
+			Error: &CommandError{
+				Code: ExitInvalidArgument, Type: "validation_error",
+				Message:     "Missing required flag: --id",
+				Recoverable: false,
+				Suggestions: []string{"hotify-cli resume --id <id>"},
+			},
+		}, format)
+		os.Exit(ExitInvalidArgument)
+	}
+
+	targetObj, err := getActiveTarget(*target)
+	if err != nil {
+		printOutput(CommandResult{
+			Version: Version, Success: false,
+			Error: &CommandError{
+				Code: ExitTargetNotFound, Type: "target_error", Message: err.Error(),
+				Recoverable: false,
+			},
+		}, format)
+		os.Exit(ExitTargetNotFound)
+	}
+
+	handleRemoteResume(*id, targetObj, format)
+}
+
 // handleDaemonStart starts the hotify UI daemon (called when start has no --id)
 func handleDaemonStart() {
 	startCmd := flag.NewFlagSet("start", flag.ExitOnError)

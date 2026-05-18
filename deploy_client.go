@@ -82,6 +82,12 @@ func (d *DeploymentClient) StopApp(appID string) error {
 func (d *DeploymentClient) RestartApp(appID string) error {
 	return d.HTTPClient.Post(fmt.Sprintf("/api/apps/%s/restart", appID), nil)
 }
+func (d *DeploymentClient) PauseApp(appID string) error {
+	return d.HTTPClient.Post(fmt.Sprintf("/api/apps/%s/pause", appID), nil)
+}
+func (d *DeploymentClient) ResumeApp(appID string) error {
+	return d.HTTPClient.Post(fmt.Sprintf("/api/apps/%s/resume", appID), nil)
+}
 func (d *DeploymentClient) GetAppStatus(appID string) (map[string]interface{}, error) {
 	return d.HTTPClient.Get(fmt.Sprintf("/api/apps/%s/status", appID))
 }
