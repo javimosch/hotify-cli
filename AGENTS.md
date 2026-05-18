@@ -1,11 +1,13 @@
-# Hotify CLI - Agent Documentation (v2.3.0)
+# Hotify CLI - Agent Documentation (v2.6.0)
 
 ## Overview
 Hotify is a CLI+UI tool for managing Traefik/Cloudflare app deployment. It automates DNS setup, SSL certificates, and reverse proxy configuration for web apps.
 
 **Default output is JSON** (machine-readable). Add `--human` for human-readable text.
 
-## v2.3.0 CLI Structure
+**Transport**: All remote operations use the hotify HTTP API (no SSH required). Set `ssh_host` on targets only for the legacy `traefik-system` command.
+
+## v2.6.0 CLI Structure
 
 ```
 init          Initialize config (non-interactive in JSON mode, requires --token --domain --email)
@@ -24,19 +26,122 @@ resume --id    Resume paused remote app (SIGCONT). Add --local for local executi
 deploy        File transfer only: --id --source required
 
 setup-dns     Create/update Cloudflare DNS A record: --id --ip (auto-detected if omitted)
-              TC4: checks for existing record — skips if IP matches, updates if IP differs
 setup-traefik Configure Traefik routing for an app: --id [--challenge-type http|dns]
-              TC1: generates explicit domain spec in dynamic.yml (no more ACME errors)
-              TC2: --challenge-type selects HTTP (default, simpler) or DNS challenge
-              TC3: uses restart (not reload) — works even when reload is unsupported
-              TC5: validates config before touching any Traefik files
 
 prune         Cleanup DNS/Traefik: --id <app> or --all
+
+# Docker Compose passthrough
+compose [--id <app>] <subcommand> [args...]   # app-aware docker compose passthrough
+
+# Docker Compose Deployment Automation (v2.6.0)
+deploy-compose   Copy full project tree to remote compose_path via HTTP API
+compose-sync     Sync compose file (+ .env) only — faster than full deploy
+compose-copy-dir Copy a specific local directory into remote compose_path
+volume-init      Populate a Docker named volume with local directory content
+setup-compose    Register app config + deploy project files in one command
 
 traefik-system  Install/manage Traefik on target
 auth          Authenticate with remote daemon
 targets       Manage deployment targets
 api-keys      Manage API keys
+```
+
+## v2.6.0 Docker Compose Deployment Commands
+
+### deploy-compose (most commonly used)
+
+Replaces the manual `scp` workflow. Copies the full project tree (compose file, .env, webui/, etc.) to the remote `compose_path` in one command.
+
+```bash
+# Full deploy of a compose project
+hotify-cli deploy-compose \
+  --id cir-doc-gen \
+  --source /local/path/to/project
+
+# With explicit compose file and remote path override
+hotify-cli deploy-compose \
+  --id cir-doc-gen \
+  --source /local/path/to/project \
+  --compose-file docker-compose.yml \
+  --remote-path /home/dk1/cir-doc-gen
+
+# Deploy and start immediately
+hotify-cli deploy-compose --id cir-doc-gen --source ./project --start
+```
+
+Replaces this manual workflow:
+```bash
+# OLD (manual):
+scp docker-compose.yml dk1@host:/home/dk1/cir-doc-gen/
+scp .env dk1@host:/home/dk1/cir-doc-gen/
+scp -r webui dk1@host:/home/dk1/cir-doc-gen/
+```
+
+### compose-sync
+
+Sync only the compose file (and optionally `.env`) without re-uploading the full project tree. Useful after editing docker-compose.yml.
+
+```bash
+# Sync from current directory
+hotify-cli compose-sync --id cir-doc-gen
+
+# Sync from specific directory, then restart
+hotify-cli compose-sync --id cir-doc-gen --source ./project --restart
+
+# Sync compose file only (skip .env)
+hotify-cli compose-sync --id cir-doc-gen --env=false
+```
+
+### compose-copy-dir
+
+Copy a specific local directory into the app's remote `compose_path`.
+
+```bash
+# Copy webui/ directory
+hotify-cli compose-copy-dir \
+  --id cir-doc-gen \
+  --dir webui \
+  --source /local/path/webui
+
+# Copy templates/
+hotify-cli compose-copy-dir --id cir-doc-gen --dir templates --source ./templates
+```
+
+Replaces: `scp -r webui dk1@host:/home/dk1/cir-doc-gen/`
+
+### volume-init
+
+Populate a Docker named volume with local directory contents.
+
+```bash
+hotify-cli volume-init \
+  --id cir-doc-gen \
+  --volume cir-webui \
+  --source /home/dk1/cir-doc-gen/webui
+```
+
+Volume name resolution: `<app_id>_<volume>` → `/var/lib/docker/volumes/cir-doc-gen_cir-webui/_data/`
+
+**NOTE**: The remote hotify daemon must have write access to `/var/lib/docker/volumes/` (root or Docker group membership on the remote host).
+
+Replaces: `sudo cp -r /home/dk1/cir-doc-gen/webui/* /var/lib/docker/volumes/cir-doc-gen_cir-webui/_data/`
+
+### setup-compose
+
+Combines app registration (`setup`) and project file deployment in a single command.
+
+```bash
+hotify-cli setup-compose \
+  --id cir-doc-gen \
+  --name "CIR Doc Gen" \
+  --domain cir-doc-gen \
+  --port 8080 \
+  --cmd "docker compose up -d" \
+  --source /local/project \
+  --compose-file docker-compose.yml \
+  --remote-path /home/dk1/cir-doc-gen \
+  --setup-dns \
+  --start
 ```
 
 ## Agent Usage

@@ -145,6 +145,9 @@ type App struct {
 	BuildType  string `json:"build_type,omitempty"`
 	Remote     string `json:"remote,omitempty"`
 	PID        int    `json:"pid,omitempty"`
+	// Docker Compose fields
+	ComposeFile string `json:"compose_file,omitempty"`
+	ComposePath string `json:"compose_path,omitempty"`
 }
 
 func getConfigPath() (string, error) {

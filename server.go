@@ -106,6 +106,12 @@ func startServer(port int) {
 	// Deployment endpoints (auth required)
 	mux.HandleFunc("/api/deploy", authMiddleware(handleDeployAPI))
 	mux.HandleFunc("/api/apps/", authMiddleware(handleAppManagementAPI))
+
+	// Docker Compose deployment endpoints (auth required)
+	registerComposeRoutes(mux)
+
+	// Traefik system management endpoints (auth required)
+	registerTraefikSystemRoutes(mux)
 	mux.HandleFunc("/api/apps/edit", authMiddleware(handleEditAppAPI))
 	mux.HandleFunc("/api/apps/remove", authMiddleware(handleRemoveAppAPI))
 	mux.HandleFunc("/api/apps/setup-dns", authMiddleware(handleSetupDNSAPI))
@@ -1385,13 +1391,89 @@ func handleAppStatus(w http.ResponseWriter, r *http.Request, app *App) {
 		return
 	}
 
+	// For Docker Compose apps, check actual compose stack status
+	actualStatus := app.Status
+	actualPID := app.PID
+
+	if app.ComposeFile != "" && app.ComposePath != "" {
+		composeStatus, composePID := checkComposeStatus(app.ComposePath, app.ComposeFile, app.Port)
+		if composeStatus != "not_running" {
+			actualStatus = composeStatus
+			actualPID = composePID
+
+			// Update cached status in config
+			config, _ := loadConfig()
+			for i := range config.Apps {
+				if config.Apps[i].ID == app.ID {
+					config.Apps[i].Status = actualStatus
+					config.Apps[i].PID = actualPID
+					saveConfig(config)
+					break
+				}
+			}
+		}
+	} else if app.PID > 0 {
+		// For regular apps, check if PID is still alive
+		if !pidExists(app.PID) {
+			actualStatus = "not_running"
+			actualPID = 0
+
+			// Update cached status
+			config, _ := loadConfig()
+			for i := range config.Apps {
+				if config.Apps[i].ID == app.ID {
+					config.Apps[i].Status = actualStatus
+					config.Apps[i].PID = actualPID
+					saveConfig(config)
+					break
+				}
+			}
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"id":     app.ID,
 		"name":   app.Name,
-		"status": app.Status,
-		"pid":    app.PID,
+		"status": actualStatus,
+		"pid":    actualPID,
 	})
+}
+
+// checkComposeStatus checks if a Docker Compose stack is running
+// Returns (status, pid) where pid is 0 if not found
+func checkComposeStatus(composePath string, composeFile string, port int) (string, int) {
+	// Check if compose file exists
+	composeFilePath := filepath.Join(composePath, composeFile)
+	if _, err := os.Stat(composeFilePath); err != nil {
+		return "not_running", 0
+	}
+
+	// For Docker Compose apps, just check if the port is listening
+	// This is simpler and more reliable than parsing docker compose ps output
+	if port > 0 {
+		if pid := findPIDByPort(port); pid > 0 {
+			return "running", pid
+		}
+	}
+
+	// Fallback: try docker compose ps (basic check)
+	cmd := exec.Command("docker", "compose", "-f", composeFile, "ps", "--format", "{{.State}}")
+	cmd.Dir = composePath
+	output, err := cmd.Output()
+	if err != nil {
+		return "not_running", 0
+	}
+
+	// Check if any service is running
+	states := strings.Split(string(output), "\n")
+	for _, state := range states {
+		if strings.TrimSpace(state) == "running" {
+			return "running", 0
+		}
+	}
+
+	return "not_running", 0
 }
 
 func handleAppLogs(w http.ResponseWriter, r *http.Request, app *App) {

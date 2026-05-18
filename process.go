@@ -7,14 +7,21 @@ import (
 	"time"
 )
 
-// handleCLIAppStart handles: hotify-cli start --id <id> [--target <name>] [--local]
+// handleCLIAppStart handles: hotify-cli start --id <id> [--target <name>] [--local] | --daemon [--port <port>]
 func handleCLIAppStart() {
 	format := getOutputFormat()
 	startCmd := flag.NewFlagSet("start", flag.ExitOnError)
 	id := startCmd.String("id", "", "App ID to start")
 	target := startCmd.String("target", "", "Target name (uses default if not specified)")
 	local := startCmd.Bool("local", false, "Execute directly on local server")
+	daemon := startCmd.Bool("daemon", false, "Run as daemon")
+	port := startCmd.Int("port", 8080, "Port for HTTP server")
 	startCmd.Parse(filterHumanFlag(os.Args[2:]))
+
+	if *daemon {
+		startDaemon(*port)
+		return
+	}
 
 	if *id == "" {
 		// No --id: fall through to daemon handling in main.go

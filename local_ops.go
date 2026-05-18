@@ -308,9 +308,25 @@ func handleLocalStatus(appID string, format OutputFormat) {
 		os.Exit(ExitInvalidArgument)
 	}
 
+	// Check actual status for Docker Compose apps
+	actualStatus := app.Status
+	actualPID := app.PID
+	if app.ComposeFile != "" && app.ComposePath != "" {
+		if status, pid := checkComposeStatus(app.ComposePath, app.ComposeFile, app.Port); status != "not_running" {
+			actualStatus = status
+			actualPID = pid
+			// Update config if status changed
+			if actualStatus != app.Status {
+				app.Status = actualStatus
+				app.PID = actualPID
+				saveConfig(config)
+			}
+		}
+	}
+
 	printOutput(CommandResult{
 		Version: Version, Success: true,
-		Data:    map[string]interface{}{"app_id": appID, "status": app.Status, "pid": app.PID},
+		Data:    map[string]interface{}{"app_id": appID, "status": actualStatus, "pid": actualPID},
 		Metadata: map[string]interface{}{"timestamp": time.Now().Unix()},
 	}, format)
 }

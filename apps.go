@@ -29,6 +29,8 @@ func setupApp(isUpsert bool) {
 	source := cmd.String("source", "", "App source URL or repo (optional metadata)")
 	setupDNS := cmd.Bool("setup-dns", false, "Also create Cloudflare DNS A record after saving")
 	ip := cmd.String("ip", "", "Server IP for DNS (auto-detected if omitted)")
+	composeFile := cmd.String("compose-file", "", "Docker Compose file to use (e.g. compose.binary.yml)")
+	composePath := cmd.String("compose-path", "", "Path on remote where compose files live")
 	cmd.Parse(filterHumanFlag(os.Args[2:]))
 
 	if *id == "" {
@@ -86,6 +88,12 @@ func setupApp(isUpsert bool) {
 		if *source != "" {
 			app.Source = *source
 		}
+		if *composeFile != "" {
+			app.ComposeFile = *composeFile
+		}
+		if *composePath != "" {
+			app.ComposePath = *composePath
+		}
 		config.Apps[existingIdx] = app
 	} else {
 		// New app — all required fields must be present
@@ -103,13 +111,15 @@ func setupApp(isUpsert bool) {
 			os.Exit(ExitInvalidArgument)
 		}
 		config.Apps = append(config.Apps, App{
-			ID:      *id,
-			Name:    *name,
-			Domain:  fmt.Sprintf("%s.%s", *domain, config.Domain),
-			Port:    *port,
-			Command: *command,
-			Source:  *source,
-			Status:  "stopped",
+			ID:          *id,
+			Name:        *name,
+			Domain:      fmt.Sprintf("%s.%s", *domain, config.Domain),
+			Port:        *port,
+			Command:     *command,
+			Source:      *source,
+			Status:      "stopped",
+			ComposeFile: *composeFile,
+			ComposePath: *composePath,
 		})
 		existingIdx = len(config.Apps) - 1
 	}
@@ -148,11 +158,13 @@ func setupApp(isUpsert bool) {
 		Version: Version,
 		Success: true,
 		Data: map[string]interface{}{
-			"id":     app.ID,
-			"name":   app.Name,
-			"domain": app.Domain,
-			"port":   app.Port,
-			"cmd":    app.Command,
+			"id":           app.ID,
+			"name":         app.Name,
+			"domain":       app.Domain,
+			"port":         app.Port,
+			"cmd":          app.Command,
+			"compose_file": app.ComposeFile,
+			"compose_path": app.ComposePath,
 		},
 		Metadata: map[string]interface{}{
 			"warnings": warnings,
@@ -260,13 +272,15 @@ func listApps() {
 	apps := make([]map[string]interface{}, 0, len(config.Apps))
 	for _, app := range config.Apps {
 		apps = append(apps, map[string]interface{}{
-			"id":     app.ID,
-			"name":   app.Name,
-			"domain": app.Domain,
-			"port":   app.Port,
-			"cmd":    app.Command,
-			"source": app.Source,
-			"status": app.Status,
+			"id":           app.ID,
+			"name":         app.Name,
+			"domain":       app.Domain,
+			"port":         app.Port,
+			"cmd":          app.Command,
+			"source":       app.Source,
+			"status":       app.Status,
+			"compose_file": app.ComposeFile,
+			"compose_path": app.ComposePath,
 		})
 	}
 
@@ -285,6 +299,9 @@ func listApps() {
 			fmt.Printf("  Cmd:    %s\n", app.Command)
 			if app.Source != "" {
 				fmt.Printf("  Source: %s\n", app.Source)
+			}
+			if app.ComposeFile != "" {
+				fmt.Printf("  Compose: %s (at %s)\n", app.ComposeFile, app.ComposePath)
 			}
 			fmt.Printf("  Status: %s\n", app.Status)
 			fmt.Println()

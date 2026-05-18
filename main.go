@@ -5,7 +5,7 @@ import (
 	"os"
 )
 
-const Version = "2.4.0"
+const Version = "2.7.1"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -57,6 +57,22 @@ func main() {
 	// Docker container management
 	case "docker":
 		handleDockerCLI()
+
+	// Docker Compose passthrough
+	case "compose":
+		handleComposeCLI()
+
+	// Docker Compose deployment automation
+	case "deploy-compose":
+		handleDeployCompose()
+	case "compose-sync":
+		handleComposeSyncCLI()
+	case "compose-copy-dir":
+		handleComposeCopyDirCLI()
+	case "volume-init":
+		handleVolumeInitCLI()
+	case "setup-compose":
+		handleSetupComposeCLI()
 
 	// Infrastructure
 	case "prune":
@@ -124,6 +140,30 @@ func printHelp() {
 	fmt.Println("  docker enable-traefik   Enable Traefik Docker provider")
 	fmt.Println("  docker disable-traefik  Disable Traefik Docker provider")
 	fmt.Println()
+	fmt.Println("Docker Compose (passthrough):")
+	fmt.Println("  compose [--id <app>] <subcommand> [args...]")
+	fmt.Println("  When --id is set, resolves compose_path and compose_file from app config")
+	fmt.Println("  Examples:")
+	fmt.Println("    hotify-cli compose --id cmdcenter up -d")
+	fmt.Println("    hotify-cli compose --id cmdcenter logs -f")
+	fmt.Println("    hotify-cli compose --id cmdcenter down")
+	fmt.Println()
+	fmt.Println("Docker Compose Deployment Automation:")
+	fmt.Println("  deploy-compose      Copy full project tree to remote compose_path")
+	fmt.Println("                      --id <app> --source <local-dir> [--compose-file <file>]")
+	fmt.Println("                      [--remote-path <path>] [--start]")
+	fmt.Println("  compose-sync        Sync compose file (+ .env) to remote compose_path")
+	fmt.Println("                      --id <app> [--source <dir>] [--restart] [--env=false]")
+	fmt.Println("  compose-copy-dir    Copy a local directory into remote compose_path")
+	fmt.Println("                      --id <app> --dir <subdir-name> --source <local-dir>")
+	fmt.Println("  volume-init         Populate a Docker named volume with local directory")
+	fmt.Println("                      --id <app> --volume <vol-name> --source <local-dir>")
+	fmt.Println("                      NOTE: remote daemon needs write access to /var/lib/docker/volumes/")
+	fmt.Println("  setup-compose       Register app + deploy project files in one command")
+	fmt.Println("                      --id <app> --name <n> --domain <d> --port <p> --cmd <c>")
+	fmt.Println("                      --source <dir> [--compose-file <f>] [--remote-path <p>]")
+	fmt.Println("                      [--setup-dns] [--start]")
+	fmt.Println()
 	fmt.Println("Cleanup:")
 	fmt.Println("  prune           Remove DNS/Traefik config for an app or globally")
 	fmt.Println()
@@ -145,6 +185,9 @@ func printHelp() {
 	fmt.Println("  hotify-cli setup --id myapp --name 'My App' --domain myapp --port 3000 --cmd '/usr/local/bin/myapp start'")
 	fmt.Println("  hotify-cli setup --id myapp --port 4000   # update port only")
 	fmt.Println("  hotify-cli setup --id myapp --domain myapp --port 3000 --setup-dns  # with auto DNS")
+	fmt.Println()
+	fmt.Println("  # Setup Docker Compose app")
+	fmt.Println("  hotify-cli setup --id cmdcenter --name 'CmdCenter' --domain cmdcenter --port 3031 --cmd 'docker compose up -d' --compose-file compose.binary.yml --compose-path /home/dk1/cmdcenter")
 	fmt.Println("  hotify-cli setup --id myapp --domain myapp --port 3000 --setup-dns --ip 1.2.3.4")
 	fmt.Println()
 	fmt.Println("  # Deploy binary and optionally set up DNS")
