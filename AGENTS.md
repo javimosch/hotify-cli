@@ -1,4 +1,4 @@
-# Hotify CLI - Agent Documentation (v2.6.0)
+# Hotify CLI - Agent Documentation (v2.7.2)
 
 ## Overview
 Hotify is a CLI+UI tool for managing Traefik/Cloudflare app deployment. It automates DNS setup, SSL certificates, and reverse proxy configuration for web apps.
@@ -744,6 +744,131 @@ hotify-cli api-keys --action permissions --name <name> --add <perms> --remove <p
 6. **Document custom commands** for each app
 7. **Regular security updates** for Traefik
 8. **Monitor SSL certificate expiry**
+
+### Migration & Local Management
+
+#### Migrating Existing Services to Hotify
+
+When an agent needs to migrate an existing service to hotify management:
+
+```bash
+# 1. Investigate current service setup
+ps aux | grep app-name                      # Find process
+systemctl --user status app-name             # Check systemd user service
+sudo systemctl status app-name              # Check systemd system service
+netstat -tlnp | grep :port                  # Check port usage
+
+# 2. Stop existing process manager
+systemctl --user stop app-name               # Stop systemd user service
+# OR
+sudo systemctl stop app-name                # Stop systemd system service
+
+# 3. Add to hotify configuration
+hotify-cli setup \
+  --id app-name \
+  --name "App Name" \
+  --domain app-name \
+  --port 8080 \
+  --command "/path/to/app start"
+
+# 4. Setup DNS and Traefik (can be done while service runs)
+hotify-cli setup-dns --id app-name --ip <server-ip>
+hotify-cli setup-traefik --id app-name
+
+# 5. Start via hotify (use --local for same-machine management)
+hotify-cli start --id app-name --local
+
+# 6. Verify migration success
+hotify-cli status --id app-name --local
+curl -I https://app-name.example.com
+
+# 7. Disable old service to prevent conflicts
+systemctl --user disable app-name
+# OR
+sudo systemctl disable app-name
+```
+
+#### Local vs Remote Management for Agents
+
+Agents should understand when to use `--local` flag:
+
+**Use `--local` when:**
+- Hotify-cli and app run on the same machine
+- Managing services on the local server
+- No remote daemon configuration needed
+- Faster execution for local operations
+
+**Skip `--local` when:**
+- Managing apps on remote servers
+- Using configured targets with auth tokens
+- Distributed deployment scenarios
+- Need HTTP API for remote operations
+
+```bash
+# Local management example
+hotify-cli start --id myapp --local    # Direct PID management
+hotify-cli status --id myapp --local   # Local config access
+
+# Remote management example  
+hotify-cli start --id myapp            # Via HTTP API to remote daemon
+hotify-cli status --id myapp           # Remote status check
+```
+
+#### Multi-Port Application Considerations
+
+For applications with multiple ports (HTTP + WebSocket, etc.):
+
+```bash
+# Primary HTTP port gets Traefik configuration
+hotify-cli setup --id multiport-app --domain app --port 8080 --command "/app start"
+hotify-cli setup-dns --id multiport-app --ip <server-ip>
+hotify-cli setup-traefik --id multiport-app
+
+# Secondary ports remain accessible via direct IP
+# WebSocket example: ws://<server-ip>:8765
+# Configure workers/clients to use direct IP for secondary ports
+```
+
+#### Process Conflict Detection
+
+Agents should detect and prevent process manager conflicts:
+
+```bash
+# Check for conflicting systemd services
+systemctl list-units --all | grep app-name
+systemctl --user list-units --all | grep app-name
+
+# Check for supervisor processes
+sudo supervisorctl status all | grep app-name
+
+# Check for running processes
+ps aux | grep app-name | grep -v grep
+
+# Resolution: disable conflicting managers
+sudo systemctl disable conflicting-service
+systemctl --user disable conflicting-service
+sudo supervisorctl remove conflicting-service
+```
+
+#### Fallback Access Strategy
+
+Maintain fallback access during migration:
+
+```bash
+# Phase 1: Both access methods available
+curl http://<server-ip>:8080/health       # Direct access
+curl https://app.example.com/health       # Domain access
+
+# Phase 2: Update dependent services
+# Update worker WebSocket URLs
+# Update API client endpoints
+# Update documentation
+
+# Phase 3: Deprecate direct access
+# Configure firewall rules
+# Update monitoring systems
+# Remove direct access from docs
+```
 
 ### Example Agent Session
 
