@@ -1,4 +1,4 @@
-# Hotify CLI - Agent Documentation (v2.7.2)
+# Hotify CLI - Agent Documentation (v2.7.3)
 
 ## Overview
 Hotify is a CLI+UI tool for managing Traefik/Cloudflare app deployment. It automates DNS setup, SSL certificates, and reverse proxy configuration for web apps.
@@ -27,6 +27,7 @@ deploy        File transfer only: --id --source required
 
 setup-dns     Create/update Cloudflare DNS A record: --id --ip (auto-detected if omitted)
 setup-traefik Configure Traefik routing for an app: --id [--challenge-type http|dns]
+basic-auth    Manage Traefik HTTP basic auth credentials: --id --action add|remove|list
 
 prune         Cleanup DNS/Traefik: --id <app> or --all
 
@@ -325,6 +326,33 @@ hotify-cli remove --id myapp
 # Update Traefik to remove routing
 hotify-cli setup-traefik --id myapp
 ```
+
+#### Basic Auth Protection
+
+Add HTTP basic authentication to protect apps behind Traefik:
+
+```bash
+# Add a user with password (hashed client-side with APR1-MD5)
+hotify-cli basic-auth --id myapp --action add --user admin --password secret
+
+# Add a pre-hashed entry (htpasswd format)
+hotify-cli basic-auth --id myapp --action add --hash 'admin:$apr1$...'
+
+# List users (passwords masked)
+hotify-cli basic-auth --id myapp --action list
+
+# Remove a user
+hotify-cli basic-auth --id myapp --action remove --user admin
+
+# Apply changes to Traefik
+hotify-cli setup-traefik --id myapp
+```
+
+**Notes:**
+- Passwords are hashed using APR1-MD5 (htpasswd compatible)
+- Pre-hashed entries can be imported from existing htpasswd files
+- After adding/removing users, run `setup-traefik` to apply changes
+- Basic auth middleware is only added to Traefik for apps with users configured
 
 ### Web UI for Admins
 

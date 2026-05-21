@@ -148,6 +148,9 @@ type App struct {
 	// Docker Compose fields
 	ComposeFile string `json:"compose_file,omitempty"`
 	ComposePath string `json:"compose_path,omitempty"`
+	// Traefik basic auth — htpasswd-format entries ("user:$apr1$...")
+	// Populated via: hotify-cli basic-auth --id <app> --action add --user <u> --password <p>
+	BasicAuth []string `json:"basic_auth,omitempty"`
 }
 
 func getConfigPath() (string, error) {

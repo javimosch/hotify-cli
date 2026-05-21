@@ -5,7 +5,7 @@ import (
 	"os"
 )
 
-const Version = "2.7.2"
+const Version = "2.7.3"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -80,6 +80,10 @@ func main() {
 	case "traefik-system":
 		handleTraefikSystem()
 
+	// Basic auth management
+	case "basic-auth":
+		handleBasicAuth()
+
 	// Remote target & auth management
 	case "auth":
 		handleAuth()
@@ -129,6 +133,12 @@ func printHelp() {
 	fmt.Println("  setup-dns       Create/update Cloudflare DNS A record for an app")
 	fmt.Println("  setup-traefik   Configure Traefik routing for an app")
 	fmt.Println("                  --challenge-type http|dns  (default: http)")
+	fmt.Println("  basic-auth      Manage Traefik HTTP basic auth credentials for an app")
+	fmt.Println("                  --id <app> --action add --user <u> --password <p>")
+	fmt.Println("                  --id <app> --action add --hash 'user:$apr1$...'  (pre-hashed)")
+	fmt.Println("                  --id <app> --action remove --user <u>")
+	fmt.Println("                  --id <app> --action list")
+	fmt.Println("                  Then run setup-traefik to apply changes")
 	fmt.Println()
 	fmt.Println("Docker:")
 	fmt.Println("  docker list              List all containers")

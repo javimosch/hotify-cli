@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/md5"
+	"crypto/rand"
 	"fmt"
 	"os"
 	"os/exec"
@@ -23,6 +25,117 @@ const (
 	ChallengeHTTP TraefikChallengeType = "http"
 	ChallengeDNS  TraefikChallengeType = "dns"
 )
+
+// ─── APR1-MD5 (htpasswd compatible) ──────────────────────────────────────────
+
+const apr1Alphabet = "./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+
+// apr1Encode64 encodes src bytes into the apr1 base64 variant (different byte order).
+func apr1Encode64(src []byte, n int) string {
+	var result strings.Builder
+	for i := 0; i < n; i += 3 {
+		w := 0
+		nBytes := 0
+		for j := 0; j < 3 && i+j < n; j++ {
+			w |= int(src[i+j]) << (16 - j*8)
+			nBytes++
+		}
+		for j := 0; j < nBytes+1; j++ {
+			result.WriteByte(apr1Alphabet[(w>>uint(18-j*6))&0x3f])
+		}
+	}
+	return result.String()
+}
+
+// HashAPR1 hashes password with APR1-MD5 in htpasswd format: $apr1$<salt>$<hash>
+// This is what `htpasswd -nbm user password` produces and what Traefik accepts.
+func HashAPR1(password string) (string, error) {
+	saltBytes := make([]byte, 6)
+	if _, err := rand.Read(saltBytes); err != nil {
+		return "", fmt.Errorf("error generating salt: %v", err)
+	}
+	// Encode salt to printable apr1 alphabet
+	saltStr := ""
+	for _, b := range saltBytes {
+		saltStr += string(apr1Alphabet[int(b)%len(apr1Alphabet)])
+	}
+	return hashAPR1WithSalt(password, saltStr)
+}
+
+func hashAPR1WithSalt(password, salt string) (string, error) {
+	pass := []byte(password)
+	saltB := []byte(salt)
+	magic := []byte("$apr1$")
+
+	// Digest B: md5(pass + salt + pass)
+	digestB := md5.New()
+	digestB.Write(pass)
+	digestB.Write(saltB)
+	digestB.Write(pass)
+	sumB := digestB.Sum(nil)
+
+	// Digest A: md5(pass + magic + salt + <repeat sumB> + <end bits of len(pass)>)
+	digestA := md5.New()
+	digestA.Write(pass)
+	digestA.Write(magic)
+	digestA.Write(saltB)
+	for i := len(pass); i > 0; i -= 16 {
+		if i > 16 {
+			digestA.Write(sumB)
+		} else {
+			digestA.Write(sumB[:i])
+		}
+	}
+	for i := len(pass); i > 0; i >>= 1 {
+		if i&1 != 0 {
+			digestA.Write([]byte{0})
+		} else {
+			digestA.Write(pass[:1])
+		}
+	}
+	sumA := digestA.Sum(nil)
+
+	// 1000 rounds
+	for i := 0; i < 1000; i++ {
+		c := md5.New()
+		if i&1 != 0 {
+			c.Write(pass)
+		} else {
+			c.Write(sumA)
+		}
+		if i%3 != 0 {
+			c.Write(saltB)
+		}
+		if i%7 != 0 {
+			c.Write(pass)
+		}
+		if i&1 != 0 {
+			c.Write(sumA)
+		} else {
+			c.Write(pass)
+		}
+		sumA = c.Sum(nil)
+	}
+
+	// Rearrange bytes in apr1 order
+	order := []int{0, 6, 12, 1, 7, 13, 2, 8, 14, 3, 9, 15, 4, 10, 5, 11}
+	rearranged := make([]byte, 16)
+	for i, j := range order {
+		rearranged[i] = sumA[j]
+	}
+
+	encoded := apr1Encode64(rearranged, 16)
+	return fmt.Sprintf("$apr1$%s$%s", salt, encoded), nil
+}
+
+// HtpasswdEntry returns a full htpasswd line: "user:$apr1$salt$hash"
+func HtpasswdEntry(user, password string) (string, error) {
+	hash, err := HashAPR1(password)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%s:%s", user, hash), nil
+}
 
 // validateTraefikConfig checks that the config has required fields before
 // applying any Traefik configuration changes.
@@ -163,6 +276,9 @@ func updateDynamicConfig(config *Config) error {
 		sb.WriteString(fmt.Sprintf("      rule: \"Host(`%s`)\"\n", app.Domain))
 		sb.WriteString(fmt.Sprintf("      service: %s\n", app.ID))
 		sb.WriteString("      entryPoints:\n        - websecure\n")
+		if len(app.BasicAuth) > 0 {
+			sb.WriteString(fmt.Sprintf("      middlewares:\n        - %s-basic-auth\n", app.ID))
+		}
 		sb.WriteString("      tls:\n")
 		sb.WriteString("        certResolver: letsencrypt\n")
 		// Explicit domain spec — prevents ACME "domain not defined" errors
@@ -177,6 +293,31 @@ func updateDynamicConfig(config *Config) error {
 		sb.WriteString("      loadBalancer:\n")
 		sb.WriteString("        servers:\n")
 		sb.WriteString(fmt.Sprintf("          - url: \"http://127.0.0.1:%d\"\n\n", app.Port))
+	}
+
+	// Emit middlewares section only for apps that have basicAuth entries
+	hasMiddleware := false
+	for _, app := range config.Apps {
+		if len(app.BasicAuth) > 0 {
+			hasMiddleware = true
+			break
+		}
+	}
+	if hasMiddleware {
+		sb.WriteString("  middlewares:\n")
+		for _, app := range config.Apps {
+			if len(app.BasicAuth) == 0 {
+				continue
+			}
+			sb.WriteString(fmt.Sprintf("    %s-basic-auth:\n", app.ID))
+			sb.WriteString("      basicAuth:\n")
+			sb.WriteString("        users:\n")
+			for _, entry := range app.BasicAuth {
+				// YAML-escape the hash — $ chars need to be quoted
+				sb.WriteString(fmt.Sprintf("          - %q\n", entry))
+			}
+			sb.WriteString("\n")
+		}
 	}
 
 	if err := os.WriteFile(traefikDynamic, []byte(sb.String()), 0644); err != nil {
