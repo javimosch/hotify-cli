@@ -354,6 +354,34 @@ hotify-cli setup-traefik --id myapp
 - After adding/removing users, run `setup-traefik` to apply changes
 - Basic auth middleware is only added to Traefik for apps with users configured
 
+#### Remote Execution
+
+The `basic-auth`, `setup-traefik`, and `setup-dns` commands support remote execution via HTTP API, allowing developers to run commands from their local machine without SSH access to the server:
+
+```bash
+# Remote mode (default - uses configured target)
+hotify-cli basic-auth --id myapp --action list
+hotify-cli setup-traefik --id myapp
+hotify-cli setup-dns --id myapp
+
+# Explicit target specification
+hotify-cli basic-auth --id myapp --action list --target dk1
+hotify-cli setup-traefik --id myapp --target dk1
+hotify-cli setup-dns --id myapp --target dk1
+
+# Local mode (execute directly on local server)
+hotify-cli basic-auth --id myapp --action list --local
+hotify-cli setup-traefik --id myapp --local
+hotify-cli setup-dns --id myapp --local
+```
+
+**Remote Endpoints:**
+- `POST /api/remote/apps/{id}/basic-auth` - Manage basic auth credentials
+- `POST /api/remote/apps/{id}/setup-traefik` - Configure Traefik routing
+- `POST /api/remote/apps/{id}/setup-dns` - Configure Cloudflare DNS
+
+**Use Case:** DevOps installs hotify-cli on the remote server (dk1), developers use hotify-cli locally with configured targets to manage apps without SSH access.
+
 ### Web UI for Admins
 
 Start daemon for human admins:

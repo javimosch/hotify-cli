@@ -110,6 +110,9 @@ func startServer(port int) {
 	// Docker Compose deployment endpoints (auth required)
 	registerComposeRoutes(mux)
 
+	// App-specific remote endpoints (auth required)
+	registerAppRemoteRoutes(mux)
+
 	// Traefik system management endpoints (auth required)
 	registerTraefikSystemRoutes(mux)
 	mux.HandleFunc("/api/apps/edit", authMiddleware(handleEditAppAPI))
@@ -796,6 +799,19 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 				Success:   false,
 			})
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		// Check permissions for the endpoint
+		requiredPermissions := GetRequiredPermissions(r.URL.Path, r.Method)
+		if !CheckTokenPermissions(token, requiredPermissions) {
+			auditLogger.LogEvent(AuditEvent{
+				EventType: AuditEventAuthFailed,
+				TokenName: key.Name,
+				Details:   fmt.Sprintf("Permission denied for %s %s. Required: %v", r.Method, r.URL.Path, requiredPermissions),
+				Success:   false,
+			})
+			http.Error(w, "Forbidden: Insufficient permissions", http.StatusForbidden)
 			return
 		}
 

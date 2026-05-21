@@ -95,6 +95,56 @@ func (d *DeploymentClient) GetAppLogs(appID string) (map[string]interface{}, err
 	return d.HTTPClient.Get(fmt.Sprintf("/api/apps/%s/logs", appID))
 }
 
+// ─── App-specific remote operations ─────────────────────────────────────────
+
+// BasicAuthAdd adds a user with plaintext password to app's basic auth.
+func (d *DeploymentClient) BasicAuthAdd(appID, user, password string) error {
+	return d.HTTPClient.Post(fmt.Sprintf("/api/remote/apps/%s/basic-auth", appID), map[string]interface{}{
+		"action":   "add",
+		"user":     user,
+		"password": password,
+	})
+}
+
+// BasicAuthAddHash adds a pre-hashed htpasswd entry to app's basic auth.
+func (d *DeploymentClient) BasicAuthAddHash(appID, hash string) error {
+	return d.HTTPClient.Post(fmt.Sprintf("/api/remote/apps/%s/basic-auth", appID), map[string]interface{}{
+		"action": "add",
+		"hash":   hash,
+	})
+}
+
+// BasicAuthRemove removes a user from app's basic auth.
+func (d *DeploymentClient) BasicAuthRemove(appID, user string) error {
+	return d.HTTPClient.Post(fmt.Sprintf("/api/remote/apps/%s/basic-auth", appID), map[string]interface{}{
+		"action": "remove",
+		"user":   user,
+	})
+}
+
+// BasicAuthList lists users in app's basic auth (passwords masked).
+func (d *DeploymentClient) BasicAuthList(appID string) (map[string]interface{}, error) {
+	return d.HTTPClient.PostWithData(fmt.Sprintf("/api/remote/apps/%s/basic-auth", appID), map[string]interface{}{
+		"action": "list",
+	})
+}
+
+// SetupTraefikApp configures Traefik for a specific app remotely.
+func (d *DeploymentClient) SetupTraefikApp(appID, challengeType string) error {
+	return d.HTTPClient.Post(fmt.Sprintf("/api/remote/apps/%s/setup-traefik", appID), map[string]interface{}{
+		"challenge_type": challengeType,
+	})
+}
+
+// SetupDNSApp configures DNS for a specific app remotely.
+func (d *DeploymentClient) SetupDNSApp(appID, ip string) error {
+	payload := map[string]interface{}{}
+	if ip != "" {
+		payload["ip"] = ip
+	}
+	return d.HTTPClient.Post(fmt.Sprintf("/api/remote/apps/%s/setup-dns", appID), payload)
+}
+
 // HTTPClient is a minimal HTTP client for hotify API calls.
 type HTTPClient struct {
 	BaseURL   string
@@ -128,6 +178,32 @@ func (h *HTTPClient) Get(path string) (map[string]interface{}, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error creating request: %v", err)
 	}
+	req.Header.Set("Authorization", "Bearer "+h.AuthToken)
+	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("error making request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("request failed with status %d", resp.StatusCode)
+	}
+	var result map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("error decoding response: %v", err)
+	}
+	return result, nil
+}
+
+func (h *HTTPClient) PostWithData(path string, payload map[string]interface{}) (map[string]interface{}, error) {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling payload: %v", err)
+	}
+	req, err := http.NewRequest("POST", h.BaseURL+path, newRequestBody(data))
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+h.AuthToken)
 	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
 	if err != nil {

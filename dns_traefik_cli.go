@@ -6,12 +6,14 @@ import (
 	"os"
 )
 
-// handleSetupDNSCLI handles: hotify-cli setup-dns --id <id> [--ip <ip>]
+// handleSetupDNSCLI handles: hotify-cli setup-dns --id <id> [--ip <ip>] [--target <name>] [--local]
 func handleSetupDNSCLI() {
 	format := getOutputFormat()
 	cmd := flag.NewFlagSet("setup-dns", flag.ExitOnError)
 	id := cmd.String("id", "", "App ID (required)")
 	ip := cmd.String("ip", "", "Server IP (auto-detected if omitted)")
+	target := cmd.String("target", "", "Target name (uses default if not specified)")
+	local := cmd.Bool("local", false, "Execute directly on local server")
 	cmd.Parse(filterHumanFlag(os.Args[2:]))
 
 	if *id == "" {
@@ -27,33 +29,76 @@ func handleSetupDNSCLI() {
 		os.Exit(ExitInvalidArgument)
 	}
 
-	resolvedIP, warn, err := resolveServerIP(*ip)
-	if err != nil {
+	if *local {
+		// Local mode: execute directly on local server
+		resolvedIP, warn, err := resolveServerIP(*ip)
+		if err != nil {
+			printOutput(CommandResult{
+				Version: Version, Success: false,
+				Error: &CommandError{
+					Code: ExitGenericFailure, Type: "ip_resolution_error",
+					Message:     fmt.Sprintf("Could not determine server IP: %v", err),
+					Recoverable: true,
+					Suggestions: []string{"hotify-cli setup-dns --id <id> --ip <your-public-ip>"},
+				},
+			}, format)
+			os.Exit(ExitGenericFailure)
+		}
+
+		warnings := []string{}
+		if warn != "" {
+			warnings = append(warnings, warn)
+		}
+
+		if err := setupDNSForApp(*id, resolvedIP); err != nil {
+			printOutput(CommandResult{
+				Version: Version, Success: false,
+				Error: &CommandError{
+					Code: ExitGenericFailure, Type: "dns_error",
+					Message:     err.Error(),
+					Recoverable: true,
+					Suggestions: []string{"Check Cloudflare token permissions", "Verify domain is managed by Cloudflare"},
+				},
+			}, format)
+			os.Exit(ExitGenericFailure)
+		}
+
 		printOutput(CommandResult{
-			Version: Version, Success: false,
-			Error: &CommandError{
-				Code: ExitGenericFailure, Type: "ip_resolution_error",
-				Message:     fmt.Sprintf("Could not determine server IP: %v", err),
-				Recoverable: true,
-				Suggestions: []string{"hotify-cli setup-dns --id <id> --ip <your-public-ip>"},
+			Version: Version,
+			Success: true,
+			Data: map[string]interface{}{
+				"app_id": *id,
+				"ip":     resolvedIP,
+				"action": "dns_configured",
 			},
+			Metadata: map[string]interface{}{"warnings": warnings},
 		}, format)
-		os.Exit(ExitGenericFailure)
+		return
 	}
 
-	warnings := []string{}
-	if warn != "" {
-		warnings = append(warnings, warn)
+	// Remote mode: use HTTP API
+	targetObj, err := getActiveTarget(*target)
+	if err != nil {
+		exitTargetNotFound(format, err)
 	}
 
-	if err := setupDNSForApp(*id, resolvedIP); err != nil {
+	client, err := NewDeploymentClient(targetObj)
+	if err != nil {
+		exitClientError(format, err)
+	}
+
+	if err := client.SetupDNSApp(*id, *ip); err != nil {
 		printOutput(CommandResult{
 			Version: Version, Success: false,
 			Error: &CommandError{
-				Code: ExitGenericFailure, Type: "dns_error",
-				Message:     err.Error(),
+				Code: ExitGenericFailure, Type: "remote_error",
+				Message:     fmt.Sprintf("Failed to setup DNS remotely: %v", err),
 				Recoverable: true,
-				Suggestions: []string{"Check Cloudflare token permissions", "Verify domain is managed by Cloudflare"},
+				Suggestions: []string{
+					"Check target connectivity",
+					"Verify hotify daemon is running on remote",
+					"Check app exists on remote",
+				},
 			},
 		}, format)
 		os.Exit(ExitGenericFailure)
@@ -64,19 +109,20 @@ func handleSetupDNSCLI() {
 		Success: true,
 		Data: map[string]interface{}{
 			"app_id": *id,
-			"ip":     resolvedIP,
+			"target":  targetObj.Name,
 			"action": "dns_configured",
 		},
-		Metadata: map[string]interface{}{"warnings": warnings},
 	}, format)
 }
 
-// handleSetupTraefikCLI handles: hotify-cli setup-traefik --id <id> [--challenge-type http|dns]
+// handleSetupTraefikCLI handles: hotify-cli setup-traefik --id <id> [--challenge-type http|dns] [--target <name>] [--local]
 func handleSetupTraefikCLI() {
 	format := getOutputFormat()
 	cmd := flag.NewFlagSet("setup-traefik", flag.ExitOnError)
 	id := cmd.String("id", "", "App ID (required)")
 	challengeType := cmd.String("challenge-type", "http", "ACME challenge type: http or dns (default: http)")
+	target := cmd.String("target", "", "Target name (uses default if not specified)")
+	local := cmd.Bool("local", false, "Execute directly on local server")
 	cmd.Parse(filterHumanFlag(os.Args[2:]))
 
 	if *id == "" {
@@ -118,21 +164,62 @@ func handleSetupTraefikCLI() {
 		os.Exit(ExitInvalidArgument)
 	}
 
-	if err := setupTraefikForAppWithChallenge(*id, ct, false); err != nil {
+	if *local {
+		// Local mode: execute directly on local server
+		if err := setupTraefikForAppWithChallenge(*id, ct, false); err != nil {
+			printOutput(CommandResult{
+				Version: Version, Success: false,
+				Error: &CommandError{
+					Code: ExitTraefikConfigInvalid, Type: "traefik_error",
+					Message:     err.Error(),
+					Recoverable: true,
+					Suggestions: []string{
+						"Check Traefik is installed: hotify-cli traefik-system --status",
+						"Verify app config: hotify-cli list",
+						"Check Traefik logs: sudo journalctl -u traefik -f",
+					},
+				},
+			}, format)
+			os.Exit(ExitTraefikConfigInvalid)
+		}
+		printOutput(CommandResult{
+			Version: Version,
+			Success: true,
+			Data: map[string]interface{}{
+				"app_id":         *id,
+				"challenge_type": string(ct),
+				"action":         "traefik_configured",
+			},
+		}, format)
+		return
+	}
+
+	// Remote mode: use HTTP API
+	targetObj, err := getActiveTarget(*target)
+	if err != nil {
+		exitTargetNotFound(format, err)
+	}
+
+	client, err := NewDeploymentClient(targetObj)
+	if err != nil {
+		exitClientError(format, err)
+	}
+
+	if err := client.SetupTraefikApp(*id, string(ct)); err != nil {
 		printOutput(CommandResult{
 			Version: Version, Success: false,
 			Error: &CommandError{
-				Code: ExitTraefikConfigInvalid, Type: "traefik_error",
-				Message:     err.Error(),
+				Code: ExitGenericFailure, Type: "remote_error",
+				Message:     fmt.Sprintf("Failed to setup Traefik remotely: %v", err),
 				Recoverable: true,
 				Suggestions: []string{
-					"Check Traefik is installed: hotify-cli traefik-system --status",
-					"Verify app config: hotify-cli list",
-					"Check Traefik logs: sudo journalctl -u traefik -f",
+					"Check target connectivity",
+					"Verify hotify daemon is running on remote",
+					"Check app exists on remote",
 				},
 			},
 		}, format)
-		os.Exit(ExitTraefikConfigInvalid)
+		os.Exit(ExitGenericFailure)
 	}
 
 	printOutput(CommandResult{
@@ -140,8 +227,9 @@ func handleSetupTraefikCLI() {
 		Success: true,
 		Data: map[string]interface{}{
 			"app_id":         *id,
-			"challenge_type": string(ct),
-			"action":         "traefik_configured",
+			"target":          targetObj.Name,
+			"challenge_type":  string(ct),
+			"action":          "traefik_configured",
 		},
 	}, format)
 }

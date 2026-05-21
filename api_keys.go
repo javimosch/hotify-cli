@@ -23,7 +23,6 @@ type APIKey struct {
 type APIKeyManager struct {
 	keys       map[string]*APIKey  // name -> key
 	keysByToken map[string]*APIKey  // token -> key
-	permMgr    *PermissionManager
 	audit      *AuditLogger
 	security   *SecurityManager
 }
@@ -46,7 +45,6 @@ func NewAPIKeyManager() (*APIKeyManager, error) {
 	return &APIKeyManager{
 		keys:       make(map[string]*APIKey),
 		keysByToken: make(map[string]*APIKey),
-		permMgr:    NewPermissionManager(),
 		audit:      audit,
 		security:   security,
 	}, nil
@@ -67,23 +65,31 @@ func (a *APIKeyManager) AddKey(name string, permissions []Permission, token stri
 		}
 	}
 
-	// Validate permissions
+	// Validate permissions and expand wildcards
+	var finalPermissions []Permission
 	for _, perm := range permissions {
 		if !ValidatePermission(string(perm)) {
 			return nil, fmt.Errorf("invalid permission: %s", perm)
 		}
+
+		// Expand wildcards to all permissions
+		if string(perm) == "all" || string(perm) == "*" {
+			finalPermissions = AllPermissions
+			break
+		}
+
+		finalPermissions = append(finalPermissions, perm)
 	}
 
 	// If admin is in permissions, grant all permissions
 	hasAdmin := false
-	for _, perm := range permissions {
+	for _, perm := range finalPermissions {
 		if perm == PermissionAdmin {
 			hasAdmin = true
 			break
 		}
 	}
 
-	finalPermissions := permissions
 	if hasAdmin {
 		finalPermissions = AllPermissions
 	}
@@ -106,7 +112,6 @@ func (a *APIKeyManager) AddKey(name string, permissions []Permission, token stri
 
 	a.keys[name] = key
 	a.keysByToken[key.Token] = key
-	a.permMgr.apiKeys = a.keysByToken
 
 	// Log event
 	a.audit.LogEvent(AuditEvent{
@@ -128,7 +133,6 @@ func (a *APIKeyManager) RemoveKey(name string) error {
 
 	delete(a.keys, name)
 	delete(a.keysByToken, key.Token)
-	delete(a.permMgr.apiKeys, key.Token)
 
 	// Log event
 	a.audit.LogEvent(AuditEvent{
@@ -162,8 +166,6 @@ func (a *APIKeyManager) RegenerateKey(name string) (*APIKey, error) {
 	// Update maps
 	delete(a.keysByToken, oldToken)
 	a.keysByToken[newToken] = key
-	delete(a.permMgr.apiKeys, oldToken)
-	a.permMgr.apiKeys[newToken] = key
 
 	// Log event
 	a.audit.LogEvent(AuditEvent{
@@ -211,20 +213,32 @@ func (a *APIKeyManager) UpdatePermissions(name string, add, remove []Permission)
 		return fmt.Errorf("API key '%s' not found", name)
 	}
 
-	// Add permissions
+	// Add permissions (avoid duplicates)
 	for _, perm := range add {
-		if !a.permMgr.CheckPermission(key.Token, perm) {
-			if err := a.permMgr.GrantPermission(key.Token, perm); err != nil {
-				return err
+		hasPermission := false
+		for _, existing := range key.Permissions {
+			if existing == perm {
+				hasPermission = true
+				break
 			}
+		}
+		if !hasPermission {
+			key.Permissions = append(key.Permissions, perm)
 		}
 	}
 
-	// Remove permissions
+	// Remove permissions (cannot remove admin)
 	for _, perm := range remove {
-		if err := a.permMgr.RevokePermission(key.Token, perm); err != nil {
-			return err
+		if perm == PermissionAdmin {
+			return fmt.Errorf("cannot revoke admin permission")
 		}
+		var updatedPermissions []Permission
+		for _, existing := range key.Permissions {
+			if existing != perm {
+				updatedPermissions = append(updatedPermissions, existing)
+			}
+		}
+		key.Permissions = updatedPermissions
 	}
 
 	// Log changes
