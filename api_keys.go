@@ -1,9 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -27,6 +29,54 @@ type APIKeyManager struct {
 	security   *SecurityManager
 }
 
+func apiKeysFilePath() (string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(homeDir, ".hotify", "api_keys.json"), nil
+}
+
+func (a *APIKeyManager) persistKeys() {
+	path, err := apiKeysFilePath()
+	if err != nil {
+		return
+	}
+	type store struct {
+		Keys []*APIKey `json:"keys"`
+	}
+	s := store{Keys: make([]*APIKey, 0, len(a.keys))}
+	for _, k := range a.keys {
+		s.Keys = append(s.Keys, k)
+	}
+	data, err := json.MarshalIndent(s, "", "  ")
+	if err != nil {
+		return
+	}
+	os.WriteFile(path, data, 0600)
+}
+
+func (a *APIKeyManager) loadPersistedKeys() {
+	path, err := apiKeysFilePath()
+	if err != nil {
+		return
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	var s struct {
+		Keys []*APIKey `json:"keys"`
+	}
+	if json.Unmarshal(data, &s) != nil {
+		return
+	}
+	for _, k := range s.Keys {
+		a.keys[k.Name] = k
+		a.keysByToken[k.Token] = k
+	}
+}
+
 // NewAPIKeyManager creates a new API key manager
 func NewAPIKeyManager() (*APIKeyManager, error) {
 	security, err := NewSecurityManager()
@@ -42,12 +92,14 @@ func NewAPIKeyManager() (*APIKeyManager, error) {
 	// Load existing audit events
 	audit.LoadEventsFromDisk()
 
-	return &APIKeyManager{
-		keys:       make(map[string]*APIKey),
+	mgr := &APIKeyManager{
+		keys:        make(map[string]*APIKey),
 		keysByToken: make(map[string]*APIKey),
-		audit:      audit,
-		security:   security,
-	}, nil
+		audit:       audit,
+		security:    security,
+	}
+	mgr.loadPersistedKeys()
+	return mgr, nil
 }
 
 // AddKey creates a new API key
@@ -112,6 +164,7 @@ func (a *APIKeyManager) AddKey(name string, permissions []Permission, token stri
 
 	a.keys[name] = key
 	a.keysByToken[key.Token] = key
+	a.persistKeys()
 
 	// Log event
 	a.audit.LogEvent(AuditEvent{
@@ -133,6 +186,7 @@ func (a *APIKeyManager) RemoveKey(name string) error {
 
 	delete(a.keys, name)
 	delete(a.keysByToken, key.Token)
+	a.persistKeys()
 
 	// Log event
 	a.audit.LogEvent(AuditEvent{
@@ -166,6 +220,7 @@ func (a *APIKeyManager) RegenerateKey(name string) (*APIKey, error) {
 	// Update maps
 	delete(a.keysByToken, oldToken)
 	a.keysByToken[newToken] = key
+	a.persistKeys()
 
 	// Log event
 	a.audit.LogEvent(AuditEvent{
@@ -240,6 +295,8 @@ func (a *APIKeyManager) UpdatePermissions(name string, add, remove []Permission)
 		}
 		key.Permissions = updatedPermissions
 	}
+
+	a.persistKeys()
 
 	// Log changes
 	a.audit.LogEvent(AuditEvent{

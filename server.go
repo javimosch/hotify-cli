@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -100,6 +101,7 @@ func startServer(port int) {
 	mux.HandleFunc("/api/status", authMiddleware(handleStatusAPI))
 	mux.HandleFunc("/api/health", handleHealthAPI)
 	mux.HandleFunc("/api/config", authMiddleware(handleConfigAPI))
+	mux.HandleFunc("/api/remotes/config", authMiddleware(handleRemotesConfigAPI))
 	mux.HandleFunc("/api/apps", authMiddleware(handleAppsAPI))
 	mux.HandleFunc("/api/apps/add", authMiddleware(handleAddAppAPI))
 
@@ -139,373 +141,533 @@ func handleHome(w http.ResponseWriter, r *http.Request) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hotify - Traefik/Cloudflare App Manager</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <title>Hotify</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { 
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            padding: 20px;
+        :root {
+            --canvas: #FBFBFA;
+            --surface: #FFFFFF;
+            --border: #EAEAEA;
+            --border-subtle: rgba(0,0,0,0.06);
+            --text-primary: #111111;
+            --text-secondary: #787774;
+            --text-muted: #ABABAB;
+            --font-sans: 'SF Pro Display','Helvetica Neue',-apple-system,BlinkMacSystemFont,sans-serif;
+            --font-mono: 'SF Mono','Geist Mono','JetBrains Mono',monospace;
+            --radius: 8px;
+            --radius-sm: 4px;
+            --green-bg: #EDF3EC; --green-text: #346538;
+            --red-bg: #FDEBEC;   --red-text: #9F2F2D;
+            --yellow-bg: #FBF3DB; --yellow-text: #956400;
         }
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-            padding: 40px;
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: var(--font-sans); background: var(--canvas); color: var(--text-primary); line-height: 1.6; min-height: 100vh; font-size: 14px; }
+        #appShell { display: flex; flex-direction: column; min-height: 100vh; }
+        #appShell .main { flex: 1; }
+        a { color: inherit; text-decoration: none; }
+
+        /* ── Topbar ── */
+        .topbar {
+            position: sticky; top: 0; z-index: 100;
+            background: rgba(251,251,250,0.88);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid var(--border);
+            height: 52px; padding: 0 24px;
+            display: flex; align-items: center; justify-content: space-between;
         }
-        .header {
-            margin-bottom: 30px;
-            border-bottom: 1px solid #e9ecef;
-            padding-bottom: 20px;
-        }
-        .header h1 {
-            color: #333;
-            font-size: 32px;
-            margin-bottom: 8px;
-        }
-        .header p {
-            color: #666;
-            font-size: 14px;
-        }
-        .section {
-            margin-bottom: 30px;
-        }
-        .section h2 {
-            color: #333;
-            font-size: 20px;
-            margin-bottom: 15px;
-        }
-        .config-info {
-            background: #f8f9fa;
-            border-radius: 8px;
-            padding: 20px;
-            margin-bottom: 20px;
-        }
-        .config-item {
-            display: flex;
-            justify-content: space-between;
-            padding: 10px 0;
-            border-bottom: 1px solid #e9ecef;
-        }
-        .config-item:last-child {
-            border-bottom: none;
-        }
-        .label { color: #666; font-size: 14px; }
-        .value { color: #333; font-weight: 600; font-size: 14px; }
-        .apps-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-            gap: 20px;
-        }
-        .app-card {
-            background: #f8f9fa;
-            border-radius: 8px;
-            padding: 20px;
-            border: 1px solid #e9ecef;
-        }
-        .app-card h3 {
-            color: #333;
-            font-size: 16px;
-            margin-bottom: 10px;
-        }
-        .app-card .domain {
-            color: #667eea;
-            font-size: 14px;
-            margin-bottom: 8px;
-        }
-        .app-card .status {
-            display: inline-block;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 12px;
-            font-weight: 600;
-            margin-bottom: 10px;
-        }
-        .status-running { background: #d4edda; color: #155724; }
-        .status-stopped { background: #f8d7da; color: #721c24; }
-        .app-card .info {
-            font-size: 12px;
-            color: #666;
-            margin-bottom: 5px;
-        }
+        .topbar-brand { font-size: 15px; font-weight: 700; letter-spacing: -0.02em; display: flex; align-items: center; gap: 8px; color: var(--text-primary); }
+        .topbar-brand svg { color: var(--text-secondary); }
+
+        /* ── Buttons ── */
         .btn {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 14px;
-            font-weight: 600;
-            transition: transform 0.2s;
+            font-family: var(--font-sans); font-size: 12px; font-weight: 500;
+            padding: 6px 14px; border: none; border-radius: var(--radius-sm);
+            cursor: pointer; transition: background 0.15s, transform 0.1s;
+            display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
         }
-        .btn:hover { transform: translateY(-2px); }
-        .btn-sm { padding: 6px 12px; font-size: 12px; }
-        .btn-danger { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }
-        .btn-success { background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); }
-        .modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0,0,0,0.5);
-            z-index: 1000;
+        .btn:active { transform: scale(0.98); }
+        .btn-primary { background: #111; color: #fff; }
+        .btn-primary:hover { background: #333; }
+        .btn-ghost { background: transparent; color: var(--text-secondary); border: 1px solid var(--border); }
+        .btn-ghost:hover { background: #F5F5F4; color: var(--text-primary); }
+        .btn-danger { background: transparent; color: var(--red-text); border: 1px solid #F5C6C6; }
+        .btn-danger:hover { background: var(--red-bg); }
+
+        /* ── Main ── */
+        .main { width: 100%; max-width: 1400px; margin: 0 auto; padding: 28px 24px; }
+
+        /* ── Target sections ── */
+        .target-section { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; margin-bottom: 20px; overflow: hidden; }
+        .target-header { padding: 14px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .target-icon { width: 28px; height: 28px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: #F7F6F3; display: flex; align-items: center; justify-content: center; flex-shrink: 0; color: var(--text-secondary); }
+        .target-name { font-size: 13px; font-weight: 600; }
+        .target-url { font-family: var(--font-mono); font-size: 11px; color: var(--text-secondary); }
+        .target-url:hover { color: var(--text-primary); }
+        .target-header-actions { margin-left: auto; display: flex; gap: 8px; }
+
+        /* ── Config meta row ── */
+        .target-meta { display: flex; flex-wrap: wrap; border-bottom: 1px solid var(--border); }
+        .meta-item { padding: 10px 20px; border-right: 1px solid var(--border); }
+        .meta-item:last-child { border-right: none; }
+        .meta-label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 2px; }
+        .meta-value { font-size: 13px; font-weight: 500; color: var(--text-primary); font-family: var(--font-mono); }
+
+        /* ── Apps grid ── */
+        .apps-area { padding: 16px 20px; }
+        .apps-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+        .apps-empty { padding: 32px; text-align: center; font-size: 13px; color: var(--text-muted); }
+
+        /* ── App card ── */
+        .app-card {
+            border: 1px solid var(--border); border-radius: var(--radius);
+            padding: 14px 16px; background: #FAFAF9;
+            transition: box-shadow 0.2s, border-color 0.2s;
         }
-        .modal.active { display: flex; align-items: center; justify-content: center; }
-        .modal-content {
-            background: white;
-            border-radius: 12px;
-            padding: 30px;
-            max-width: 500px;
-            width: 90%;
+        .app-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.04); border-color: #D4D4D4; }
+        .app-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+        .app-name { font-size: 13px; font-weight: 600; }
+        .app-domain { font-family: var(--font-mono); font-size: 11px; color: var(--text-secondary); display: block; margin-bottom: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .app-domain:hover { color: var(--text-primary); }
+        .app-meta { font-family: var(--font-mono); font-size: 11px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 3px; }
+        .app-internal { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); display: flex; align-items: center; gap: 4px; margin-bottom: 8px; text-decoration: none; }
+        .app-internal:hover { color: var(--text-secondary); }
+        .app-actions { display: flex; gap: 5px; margin-top: 12px; flex-wrap: wrap; }
+
+        /* ── Status badge ── */
+        .badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; border-radius: 9999px; font-size: 10px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; flex-shrink: 0; }
+        .badge-dot { width: 5px; height: 5px; border-radius: 50%; }
+        .badge-running { background: var(--green-bg); color: var(--green-text); }
+        .badge-running .badge-dot { background: var(--green-text); }
+        .badge-stopped { background: var(--red-bg); color: var(--red-text); }
+        .badge-stopped .badge-dot { background: var(--red-text); }
+        .badge-unreachable,.badge-unknown { background: var(--yellow-bg); color: var(--yellow-text); }
+        .badge-unreachable .badge-dot,.badge-unknown .badge-dot { background: var(--yellow-text); }
+
+        /* ── Login screen ── */
+        .login-screen { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+        .login-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 36px; width: 100%; max-width: 360px; }
+        .login-title { font-size: 17px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 4px; }
+        .login-sub { font-size: 13px; color: var(--text-secondary); margin-bottom: 24px; }
+
+        /* ── Modals ── */
+        .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.3); z-index: 1000; align-items: center; justify-content: center; padding: 16px; }
+        .modal-overlay.active { display: flex; }
+        .modal-box { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 28px; width: 100%; max-width: 440px; }
+        .modal-title { font-size: 15px; font-weight: 600; margin-bottom: 20px; }
+        .form-group { margin-bottom: 14px; }
+        .form-label { display: block; font-size: 11px; font-weight: 500; color: var(--text-secondary); margin-bottom: 5px; text-transform: uppercase; letter-spacing: 0.05em; }
+        .form-input { width: 100%; font-family: var(--font-sans); font-size: 13px; padding: 8px 11px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text-primary); outline: none; transition: border-color 0.15s; }
+        .form-input:focus { border-color: #888; }
+        .form-input::placeholder { color: var(--text-muted); }
+        .modal-actions { display: flex; gap: 8px; margin-top: 20px; justify-content: flex-end; }
+        .error-msg { display: none; font-size: 12px; color: var(--red-text); background: var(--red-bg); padding: 8px 11px; border-radius: var(--radius-sm); margin-bottom: 12px; }
+
+        /* ── Footer ── */
+        .site-footer {
+            border-top: 1px solid var(--border);
+            padding: 16px 24px;
+            display: flex; align-items: center; gap: 6px;
+            font-size: 12px; color: var(--text-muted);
+            flex-wrap: wrap;
         }
-        .modal-content h3 {
-            color: #333;
-            margin-bottom: 20px;
-        }
-        .form-group { margin-bottom: 15px; }
-        .form-group label {
-            display: block;
-            color: #333;
-            font-size: 14px;
-            margin-bottom: 5px;
-        }
-        .form-group input {
-            width: 100%;
-            padding: 10px;
-            border: 1px solid #e9ecef;
-            border-radius: 6px;
-            font-size: 14px;
-        }
-        .modal-actions {
-            display: flex;
-            gap: 10px;
-            margin-top: 20px;
-        }
-        .empty-state {
-            text-align: center;
-            padding: 40px;
-            color: #666;
+        .footer-link { color: var(--text-secondary); text-decoration: none; display: inline-flex; align-items: center; gap: 4px; }
+        .footer-link:hover { color: var(--text-primary); }
+        .footer-sep { color: var(--border); }
+
+        /* ── Responsive ── */
+        @media (max-width: 600px) {
+            .topbar { padding: 0 16px; }
+            .main { padding: 16px; }
+            .apps-grid { grid-template-columns: 1fr; }
+            .apps-area { padding: 12px 16px; }
+            .target-meta { flex-direction: column; }
+            .meta-item { border-right: none; border-bottom: 1px solid var(--border); }
+            .meta-item:last-child { border-bottom: none; }
+            .target-header { padding: 12px 16px; }
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <h1>🔥 Hotify</h1>
-            <p>Traefik/Cloudflare App Manager</p>
-        </div>
 
-        <div class="section">
-            <h2>Configuration</h2>
-            <div class="config-info" id="configInfo">
-                Loading...
+<!-- Login screen -->
+<div id="loginScreen" style="display:none;">
+    <div class="login-screen">
+        <div class="login-card">
+            <p class="login-title">Hotify</p>
+            <p class="login-sub">Traefik &amp; Cloudflare app manager</p>
+            <div class="form-group">
+                <label class="form-label">API Token</label>
+                <input type="password" id="loginToken" class="form-input" placeholder="Paste your token" autofocus>
             </div>
-        </div>
-
-        <div class="section">
-            <h2>Apps <button class="btn btn-sm" onclick="openAddModal()">+ Add App</button></h2>
-            <div class="apps-grid" id="appsGrid">
-                Loading...
-            </div>
+            <div id="loginError" class="error-msg"></div>
+            <button class="btn btn-primary" style="width:100%;justify-content:center;padding:9px 14px;" onclick="login()">Sign in</button>
         </div>
     </div>
+</div>
 
-    <div class="modal" id="addModal">
-        <div class="modal-content">
-            <h3>Add New App</h3>
-            <div class="form-group">
-                <label>App ID</label>
-                <input type="text" id="appId" placeholder="myapp">
-            </div>
-            <div class="form-group">
-                <label>App Name</label>
-                <input type="text" id="appName" placeholder="My App">
-            </div>
-            <div class="form-group">
-                <label>Subdomain</label>
-                <input type="text" id="appDomain" placeholder="myapp">
-            </div>
-            <div class="form-group">
-                <label>Port</label>
-                <input type="number" id="appPort" placeholder="3000">
-            </div>
-            <div class="form-group">
-                <label>Command</label>
-                <input type="text" id="appCommand" placeholder="/path/to/app start">
-            </div>
-            <div class="form-group">
-                <label>Source (optional)</label>
-                <input type="text" id="appSource" placeholder="github.com/user/repo">
-            </div>
-            <div class="modal-actions">
-                <button class="btn" onclick="closeAddModal()">Cancel</button>
-                <button class="btn btn-success" onclick="addApp()">Add App</button>
-            </div>
+<!-- App shell -->
+<div id="appShell" style="display:none;">
+    <header class="topbar">
+        <div class="topbar-brand">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>
+            </svg>
+            Hotify
+        </div>
+        <div>
+            <button class="btn btn-ghost" onclick="logout()">Sign out</button>
+        </div>
+    </header>
+    <main class="main" id="sections">
+        <p style="color:var(--text-muted);font-size:13px;">Loading...</p>
+    </main>
+    <footer class="site-footer">
+        <span>Created with</span>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="#9F2F2D" stroke="none"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+        <span>by <a href="https://github.com/jarancibia" target="_blank" rel="noopener" class="footer-link">Javier Leandro Arancibia</a></span>
+        <span class="footer-sep">&middot;</span>
+        <a href="https://github.com/jarancibia/hotify-cli" target="_blank" rel="noopener" class="footer-link">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844a9.59 9.59 0 0 1 2.504.337c1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.02 10.02 0 0 0 22 12.017C22 6.484 17.522 2 12 2z"/></svg>
+            hotify-cli
+        </a>
+    </footer>
+</div>
+
+<!-- Edit modal -->
+<div id="editModal" class="modal-overlay">
+    <div class="modal-box">
+        <p class="modal-title">Edit app</p>
+        <input type="hidden" id="editAppId">
+        <div class="form-group"><label class="form-label">Name</label><input type="text" id="editAppName" class="form-input"></div>
+        <div class="form-group"><label class="form-label">Domain</label><input type="text" id="editAppDomain" class="form-input"></div>
+        <div class="form-group"><label class="form-label">Port</label><input type="number" id="editAppPort" class="form-input"></div>
+        <div class="form-group"><label class="form-label">Command</label><input type="text" id="editAppCommand" class="form-input"></div>
+        <div class="form-group"><label class="form-label">Source</label><input type="text" id="editAppSource" class="form-input" placeholder="optional"></div>
+        <div class="modal-actions">
+            <button class="btn btn-ghost" onclick="closeEditModal()">Cancel</button>
+            <button class="btn btn-primary" onclick="editApp()">Save</button>
         </div>
     </div>
+</div>
 
-    <script>
-        function loadConfig() {
-            fetch('/api/config')
-                .then(r => r.json())
-                .then(data => {
-                    const configInfo = document.getElementById('configInfo');
-                    configInfo.innerHTML = 
-                        '<div class="config-item">' +
-                        '<span class="label">Domain</span>' +
-                        '<span class="value">' + (data.domain || 'Not set') + '</span>' +
-                        '</div>' +
-                        '<div class="config-item">' +
-                        '<span class="label">Admin Email</span>' +
-                        '<span class="value">' + (data.admin_email || 'Not set') + '</span>' +
-                        '</div>' +
-                        '<div class="config-item">' +
-                        '<span class="label">Cloudflare Token</span>' +
-                        '<span class="value">' + (data.cloudflare_token ? '••••••••' : 'Not set') + '</span>' +
-                        '</div>';
-                })
-                .catch(err => console.error('Error loading config:', err));
+<!-- Add modal -->
+<div id="addModal" class="modal-overlay">
+    <div class="modal-box">
+        <p class="modal-title">Add app</p>
+        <div class="form-group"><label class="form-label">App ID</label><input type="text" id="appId" class="form-input" placeholder="my-app"></div>
+        <div class="form-group"><label class="form-label">Name</label><input type="text" id="appName" class="form-input" placeholder="My App"></div>
+        <div class="form-group"><label class="form-label">Subdomain</label><input type="text" id="appDomain" class="form-input" placeholder="myapp"></div>
+        <div class="form-group"><label class="form-label">Port</label><input type="number" id="appPort" class="form-input" placeholder="3000"></div>
+        <div class="form-group"><label class="form-label">Command</label><input type="text" id="appCommand" class="form-input" placeholder="/path/to/app start"></div>
+        <div class="form-group"><label class="form-label">Source</label><input type="text" id="appSource" class="form-input" placeholder="github.com/user/repo (optional)"></div>
+        <div class="modal-actions">
+            <button class="btn btn-ghost" onclick="closeAddModal()">Cancel</button>
+            <button class="btn btn-primary" onclick="addApp()">Add</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    let authToken = localStorage.getItem('hotify_token') || '';
+    let _appsCache = [];
+    let _remoteMap = {};
+
+    // ── Icons ──────────────────────────────────────
+    const ICON_MONITOR = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>';
+    const ICON_SERVER  = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>';
+    const ICON_PLUS    = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+    const ICON_LINK    = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>';
+    const ICON_LAN     = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>';
+
+    // ── Auth ───────────────────────────────────────
+    function authHeaders(extra) {
+        return Object.assign({ 'Authorization': 'Bearer ' + authToken }, extra || {});
+    }
+
+    function showLogin(msg) {
+        document.getElementById('loginScreen').style.display = '';
+        document.getElementById('appShell').style.display = 'none';
+        if (msg) {
+            var el = document.getElementById('loginError');
+            el.textContent = msg;
+            el.style.display = 'block';
         }
+    }
 
-        function loadApps() {
-            fetch('/api/apps')
-                .then(r => r.json())
-                .then(data => {
-                    const appsGrid = document.getElementById('appsGrid');
-                    if (data.apps.length === 0) {
-                        appsGrid.innerHTML = '<div class="empty-state">No apps configured. Click "Add App" to get started.</div>';
-                        return;
-                    }
-                    appsGrid.innerHTML = data.apps.map(app => 
-                        '<div class="app-card">' +
-                        '<h3>' + app.name + '</h3>' +
-                        '<div class="domain">' + app.domain + '</div>' +
-                        '<div class="status status-' + (app.status === 'running' ? 'running' : 'stopped') + '">' + app.status + '</div>' +
-                        '<div class="info">Port: ' + app.port + '</div>' +
-                        '<div class="info">Command: ' + app.command + '</div>' +
-                        (app.source ? '<div class="info">Source: ' + app.source + '</div>' : '') +
-                        '<div style="margin-top: 15px; display: flex; gap: 8px; flex-wrap: wrap;">' +
-                        '<button class="btn btn-sm btn-success" onclick="setupDNS(\'' + app.id + '\')">Setup DNS</button>' +
-                        '<button class="btn btn-sm btn-success" onclick="setupTraefik(\'' + app.id + '\')">Setup Traefik</button>' +
-                        '<button class="btn btn-sm btn-danger" onclick="removeApp(\'' + app.id + '\')">Remove</button>' +
-                        '</div>' +
-                        '</div>'
-                    ).join('');
-                })
-                .catch(err => console.error('Error loading apps:', err));
+    function hideLogin() {
+        document.getElementById('loginScreen').style.display = 'none';
+        document.getElementById('appShell').style.display = '';
+        document.getElementById('loginError').style.display = 'none';
+    }
+
+    function handleUnauthorized() {
+        localStorage.removeItem('hotify_token');
+        authToken = '';
+        showLogin('Session expired — please sign in again.');
+    }
+
+    function login() {
+        var token = document.getElementById('loginToken').value.trim();
+        if (!token) return;
+        fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: token })
+        }).then(function(r) {
+            if (!r.ok) throw new Error('bad');
+            return r.json();
+        }).then(function(d) {
+            if (d.success) {
+                authToken = token;
+                localStorage.setItem('hotify_token', token);
+                hideLogin();
+                loadAll();
+            } else {
+                showLoginError('Invalid token');
+            }
+        }).catch(function() { showLoginError('Invalid token'); });
+    }
+
+    function showLoginError(msg) {
+        var el = document.getElementById('loginError');
+        el.textContent = msg;
+        el.style.display = 'block';
+    }
+
+    function logout() {
+        localStorage.removeItem('hotify_token');
+        authToken = '';
+        showLogin();
+    }
+
+    // ── Data loading ───────────────────────────────
+    function loadAll() {
+        Promise.all([
+            fetch('/api/config',         { headers: authHeaders() }),
+            fetch('/api/apps',           { headers: authHeaders() }),
+            fetch('/api/remotes/config', { headers: authHeaders() })
+        ]).then(function(rs) {
+            if (rs.some(function(r) { return r.status === 401; })) { handleUnauthorized(); throw new Error('unauthorized'); }
+            return Promise.all(rs.map(function(r) { return r.json(); }));
+        }).then(function(results) {
+            var cfg        = results[0];
+            var data       = results[1];
+            var remoteCfgs = results[2].remotes || [];
+            _appsCache = data.apps || [];
+            renderSections(cfg, _appsCache, data.remotes || [], remoteCfgs);
+        }).catch(function(e) { if (e.message !== 'unauthorized') console.error(e); });
+    }
+
+    // ── Rendering ──────────────────────────────────
+    function renderSections(cfg, apps, remotes, remoteCfgs) {
+        var groups = { __local__: [] };
+        remotes.forEach(function(r) { groups[r.name] = []; });
+        apps.forEach(function(a) {
+            var k = a.remote || '__local__';
+            if (!groups[k]) groups[k] = [];
+            groups[k].push(a);
+        });
+        _remoteMap = {};
+        remotes.forEach(function(r) { _remoteMap[r.name] = r; });
+        var remoteCfgMap = {};
+        (remoteCfgs || []).forEach(function(rc) { remoteCfgMap[rc.name] = rc; });
+
+        var html = renderLocalSection(cfg, groups['__local__']);
+        remotes.forEach(function(r) { html += renderRemoteSection(r, groups[r.name] || [], remoteCfgMap[r.name]); });
+        document.getElementById('sections').innerHTML = html;
+    }
+
+    function metaItem(label, value) {
+        return '<div class="meta-item"><div class="meta-label">' + label + '</div><div class="meta-value">' + value + '</div></div>';
+    }
+
+    function renderLocalSection(cfg, apps) {
+        var meta = metaItem('Domain', cfg.domain || '—') +
+                   metaItem('Email', cfg.admin_email || '—') +
+                   metaItem('Cloudflare', cfg.cloudflare_token ? '••••••••' : 'Not set');
+        return '<div class="target-section">' +
+            '<div class="target-header">' +
+            '<div class="target-icon">' + ICON_MONITOR + '</div>' +
+            '<span class="target-name">Local</span>' +
+            '<div class="target-header-actions"><button class="btn btn-primary" onclick="openAddModal()">' + ICON_PLUS + 'Add app</button></div>' +
+            '</div>' +
+            '<div class="target-meta">' + meta + '</div>' +
+            renderAppsArea(apps) +
+            '</div>';
+    }
+
+    function renderRemoteSection(remote, apps, rc) {
+        var meta = '';
+        if (rc) {
+            var reachBadge = rc.reachable
+                ? '<span class="badge badge-running"><span class="badge-dot"></span>reachable</span>'
+                : '<span class="badge badge-stopped"><span class="badge-dot"></span>unreachable</span>';
+            meta = '<div class="target-meta">' +
+                metaItem('Status', reachBadge) +
+                metaItem('Domain', rc.domain || '—') +
+                metaItem('Email', rc.admin_email || '—') +
+                metaItem('Cloudflare', rc.cloudflare_set ? '••••••••' : 'Not set') +
+                '</div>';
         }
+        return '<div class="target-section">' +
+            '<div class="target-header">' +
+            '<div class="target-icon">' + ICON_SERVER + '</div>' +
+            '<span class="target-name">' + remote.name + '</span>' +
+            '<a href="' + remote.url + '" target="_blank" rel="noopener" class="target-url">' + remote.url + '</a>' +
+            '<div class="target-header-actions"><button class="btn btn-primary" onclick="openAddModal()">' + ICON_PLUS + 'Add app</button></div>' +
+            '</div>' +
+            meta +
+            renderAppsArea(apps) +
+            '</div>';
+    }
 
-        function openAddModal() {
-            document.getElementById('addModal').classList.add('active');
+    function renderAppsArea(apps) {
+        if (!apps || apps.length === 0) {
+            return '<div class="apps-empty">No apps configured.</div>';
         }
+        return '<div class="apps-area"><div class="apps-grid">' + apps.map(renderAppCard).join('') + '</div></div>';
+    }
 
-        function closeAddModal() {
-            document.getElementById('addModal').classList.remove('active');
+    function badgeHTML(status) {
+        var cls = 'badge-' + (status || 'unknown').replace(/[^a-z]/g, '');
+        return '<span class="badge ' + cls + '"><span class="badge-dot"></span>' + (status || 'unknown') + '</span>';
+    }
+
+    function internalURL(app) {
+        if (!app.port) return '';
+        var host = 'localhost';
+        if (app.remote && _remoteMap[app.remote]) {
+            try { host = new URL(_remoteMap[app.remote].url).hostname; } catch(e) {}
         }
+        return 'http://' + host + ':' + app.port;
+    }
 
-        function addApp() {
-            const app = {
-                id: document.getElementById('appId').value,
-                name: document.getElementById('appName').value,
-                domain: document.getElementById('appDomain').value,
-                port: parseInt(document.getElementById('appPort').value),
-                command: document.getElementById('appCommand').value,
-                source: document.getElementById('appSource').value
-            };
+    function renderAppCard(app) {
+        var id = app.id;
+        var domain = app.domain || '';
+        var domainLink = domain
+            ? '<a href="https://' + domain + '" target="_blank" rel="noopener" class="app-domain">' + ICON_LINK + ' ' + domain + '</a>'
+            : '<span class="app-domain" style="color:var(--text-muted)">No domain</span>';
+        var iurl = internalURL(app);
+        var internalLink = iurl
+            ? '<a href="' + iurl + '" target="_blank" rel="noopener" class="app-internal">' + ICON_LAN + ' ' + iurl + '</a>'
+            : '';
+        return '<div class="app-card">' +
+            '<div class="app-card-top">' +
+            '<span class="app-name">' + (app.name || id) + '</span>' +
+            badgeHTML(app.status) +
+            '</div>' +
+            domainLink +
+            internalLink +
+            (app.command ? '<div class="app-meta">' + app.command + '</div>' : '') +
+            (app.source  ? '<div class="app-meta">' + app.source  + '</div>' : '') +
+            '<div class="app-actions">' +
+            '<button class="btn btn-ghost" onclick="openEditModalById(\'' + id + '\')">Edit</button>' +
+            '<button class="btn btn-ghost" onclick="setupDNS(\'' + id + '\')">DNS</button>' +
+            '<button class="btn btn-ghost" onclick="setupTraefik(\'' + id + '\')">Traefik</button>' +
+            '<button class="btn btn-danger" onclick="removeApp(\'' + id + '\')">Remove</button>' +
+            '</div>' +
+            '</div>';
+    }
 
-            fetch('/api/apps/add', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(app)
-            })
-            .then(r => r.json())
-            .then(data => {
-                if (data.success) {
-                    closeAddModal();
-                    loadApps();
-                } else {
-                    alert('Error adding app: ' + data.error);
-                }
-            })
-            .catch(err => console.error('Error adding app:', err));
+    // ── Modals ─────────────────────────────────────
+    function openAddModal()  { document.getElementById('addModal').classList.add('active'); }
+    function closeAddModal() { document.getElementById('addModal').classList.remove('active'); }
+    function closeEditModal(){ document.getElementById('editModal').classList.remove('active'); }
+
+    function openEditModalById(id) {
+        var app = _appsCache.find(function(a) { return a.id === id; });
+        if (!app) return;
+        document.getElementById('editAppId').value      = app.id;
+        document.getElementById('editAppName').value    = app.name    || '';
+        document.getElementById('editAppDomain').value  = app.domain  || '';
+        document.getElementById('editAppPort').value    = app.port    || '';
+        document.getElementById('editAppCommand').value = app.command || '';
+        document.getElementById('editAppSource').value  = app.source  || '';
+        document.getElementById('editModal').classList.add('active');
+    }
+
+    // ── CRUD ───────────────────────────────────────
+    function apiFetch(url, opts) {
+        return fetch(url, Object.assign({ headers: authHeaders(opts && opts.json ? { 'Content-Type': 'application/json' } : {}) }, opts))
+            .then(function(r) {
+                if (r.status === 401) { handleUnauthorized(); throw new Error('unauthorized'); }
+                return r.json();
+            });
+    }
+
+    function editApp() {
+        var app = {
+            id:      document.getElementById('editAppId').value,
+            name:    document.getElementById('editAppName').value,
+            domain:  document.getElementById('editAppDomain').value,
+            port:    parseInt(document.getElementById('editAppPort').value) || 0,
+            command: document.getElementById('editAppCommand').value,
+            source:  document.getElementById('editAppSource').value
+        };
+        apiFetch('/api/apps/edit', { method: 'POST', json: true, body: JSON.stringify(app) })
+            .then(function(d) { if (d.success) { closeEditModal(); loadAll(); } else alert(d.error); })
+            .catch(function(e) { if (e.message !== 'unauthorized') console.error(e); });
+    }
+
+    function addApp() {
+        var app = {
+            id:      document.getElementById('appId').value,
+            name:    document.getElementById('appName').value,
+            domain:  document.getElementById('appDomain').value,
+            port:    parseInt(document.getElementById('appPort').value),
+            command: document.getElementById('appCommand').value,
+            source:  document.getElementById('appSource').value
+        };
+        apiFetch('/api/apps/add', { method: 'POST', json: true, body: JSON.stringify(app) })
+            .then(function(d) { if (d.success) { closeAddModal(); loadAll(); } else alert(d.error); })
+            .catch(function(e) { if (e.message !== 'unauthorized') console.error(e); });
+    }
+
+    function setupDNS(id) {
+        if (!confirm('Setup DNS for this app?')) return;
+        apiFetch('/api/apps/setup-dns', { method: 'POST', json: true, body: JSON.stringify({ id: id, ip: '92.113.145.178' }) })
+            .then(function(d) { alert(d.success ? 'DNS setup successful!' : 'Error: ' + d.error); })
+            .catch(function(e) { if (e.message !== 'unauthorized') console.error(e); });
+    }
+
+    function setupTraefik(id) {
+        if (!confirm('Setup Traefik for this app?')) return;
+        apiFetch('/api/apps/setup-traefik', { method: 'POST', json: true, body: JSON.stringify({ id: id }) })
+            .then(function(d) { alert(d.success ? 'Traefik setup successful!' : 'Error: ' + d.error); })
+            .catch(function(e) { if (e.message !== 'unauthorized') console.error(e); });
+    }
+
+    function removeApp(id) {
+        if (!confirm('Remove this app?')) return;
+        apiFetch('/api/apps/remove', { method: 'POST', json: true, body: JSON.stringify({ id: id }) })
+            .then(function(d) { if (d.success) loadAll(); else alert(d.error); })
+            .catch(function(e) { if (e.message !== 'unauthorized') console.error(e); });
+    }
+
+    // ── Boot ───────────────────────────────────────
+    if (!authToken) {
+        showLogin();
+    } else {
+        hideLogin();
+        loadAll();
+    }
+
+    setInterval(function() { if (authToken) loadAll(); }, 30000);
+
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+            if (document.getElementById('loginScreen').style.display !== 'none') login();
+            else if (document.getElementById('editModal').classList.contains('active')) editApp();
         }
-
-        function setupDNS(appId) {
-            if (!confirm('Setup DNS for this app?')) return;
-            fetch('/api/apps/setup-dns', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id: appId, ip: '92.113.145.178' })
-            })
-            .then(r => r.json())
-            .then(data => {
-                if (data.success) {
-                    alert('DNS setup successful!');
-                } else {
-                    alert('Error setting up DNS: ' + data.error);
-                }
-            })
-            .catch(err => console.error('Error setting up DNS:', err));
-        }
-
-        function setupTraefik(appId) {
-            if (!confirm('Setup Traefik for this app?')) return;
-            fetch('/api/apps/setup-traefik', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id: appId })
-            })
-            .then(r => r.json())
-            .then(data => {
-                if (data.success) {
-                    alert('Traefik setup successful!');
-                } else {
-                    alert('Error setting up Traefik: ' + data.error);
-                }
-            })
-            .catch(err => console.error('Error setting up Traefik:', err));
-        }
-
-        function removeApp(appId) {
-            if (!confirm('Remove this app?')) return;
-            fetch('/api/apps/remove', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id: appId })
-            })
-            .then(r => r.json())
-            .then(data => {
-                if (data.success) {
-                    loadApps();
-                } else {
-                    alert('Error removing app: ' + data.error);
-                }
-            })
-            .catch(err => console.error('Error removing app:', err));
-        }
-
-        // Load initial data
-        loadConfig();
-        loadApps();
-
-        // Auto-refresh every 30 seconds
-        setInterval(() => {
-            loadConfig();
-            loadApps();
-        }, 30000);
-    </script>
+        if (e.key === 'Escape') { closeAddModal(); closeEditModal(); }
+    });
+</script>
 </body>
 </html>`
 	w.Header().Set("Content-Type", "text/html")
 	w.Write([]byte(html))
 }
+
 
 func handleStatusAPI(w http.ResponseWriter, r *http.Request) {
 	mu.Lock()
@@ -535,8 +697,66 @@ func handleConfigAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	type RemoteInfo struct {
+		Name string `json:"name"`
+		URL  string `json:"url"`
+	}
+	remotes := make([]RemoteInfo, len(config.Remotes))
+	for i, r := range config.Remotes {
+		remotes[i] = RemoteInfo{Name: r.Name, URL: r.URL}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(config)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"cloudflare_token": config.CloudflareToken,
+		"domain":           config.Domain,
+		"admin_email":      config.AdminEmail,
+		"remotes":          remotes,
+	})
+}
+
+// handleRemotesConfigAPI fetches /api/config from each configured remote and returns a map of name→config.
+func handleRemotesConfigAPI(w http.ResponseWriter, r *http.Request) {
+	config, err := loadConfig()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	security, _ := NewSecurityManager()
+	type RemoteCfg struct {
+		Name           string `json:"name"`
+		URL            string `json:"url"`
+		Domain         string `json:"domain"`
+		AdminEmail     string `json:"admin_email"`
+		CloudflareSet  bool   `json:"cloudflare_set"`
+		Reachable      bool   `json:"reachable"`
+	}
+	results := make([]RemoteCfg, 0, len(config.Remotes))
+	for _, remote := range config.Remotes {
+		rc := RemoteCfg{Name: remote.Name, URL: remote.URL}
+		token, decErr := security.DecryptToken(remote.AuthToken)
+		if decErr == nil {
+			client := &http.Client{Timeout: 5 * time.Second}
+			req, reqErr := http.NewRequest("GET", remote.URL+"/api/config", nil)
+			if reqErr == nil {
+				req.Header.Set("Authorization", "Bearer "+token)
+				resp, doErr := client.Do(req)
+				if doErr == nil && resp.StatusCode == http.StatusOK {
+					var cfg map[string]interface{}
+					if json.NewDecoder(resp.Body).Decode(&cfg) == nil {
+						rc.Reachable = true
+						if v, ok := cfg["domain"].(string); ok { rc.Domain = v }
+						if v, ok := cfg["admin_email"].(string); ok { rc.AdminEmail = v }
+						if v, ok := cfg["cloudflare_token"].(string); ok { rc.CloudflareSet = v != "" }
+					}
+					resp.Body.Close()
+				}
+			}
+		}
+		results = append(results, rc)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"remotes": results})
 }
 
 func handleAppsAPI(w http.ResponseWriter, r *http.Request) {
@@ -546,8 +766,59 @@ func handleAppsAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	apps := make([]App, len(config.Apps))
+	for i, app := range config.Apps {
+		apps[i] = app
+		if app.Domain != "" && app.Remote != "" {
+			apps[i].Status = checkDomainStatus(app.Domain)
+		} else if app.Port > 0 {
+			apps[i].Status = checkLocalPortStatus(app.Port)
+		}
+	}
+
+	type RemoteInfo struct {
+		Name string `json:"name"`
+		URL  string `json:"url"`
+	}
+	remotes := make([]RemoteInfo, len(config.Remotes))
+	for i, r := range config.Remotes {
+		remotes[i] = RemoteInfo{Name: r.Name, URL: r.URL}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"apps": config.Apps})
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"apps":    apps,
+		"remotes": remotes,
+	})
+}
+
+// checkDomainStatus probes the app's public domain over HTTPS then HTTP.
+// Any HTTP response (even 4xx) means the app is up.
+func checkDomainStatus(domain string) string {
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	for _, scheme := range []string{"https", "http"} {
+		resp, err := client.Get(scheme + "://" + domain)
+		if err == nil {
+			resp.Body.Close()
+			return "running"
+		}
+	}
+	return "stopped"
+}
+
+// checkLocalPortStatus checks if something is listening on localhost:port.
+func checkLocalPortStatus(port int) string {
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("localhost:%d", port), 2*time.Second)
+	if err != nil {
+		return "stopped"
+	}
+	conn.Close()
+	return "running"
 }
 
 func handleAddAppAPI(w http.ResponseWriter, r *http.Request) {
