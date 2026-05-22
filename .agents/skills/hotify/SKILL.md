@@ -51,8 +51,8 @@ hotify-cli setup-traefik --id myapp --local
 ## Key Commands
 
 ### App Management
-- `hotify setup --id <id> --name <n> --domain <d> --port <p> --cmd <c>` — Create or update app
-- `hotify add --id <id> --name <n> --domain <d> --port <p> --cmd <c>` — Strict create (fails if exists)
+- `hotify setup --id <id> --name <n> --domain <d> --port <p> --cmd <c> [--backend-url <url>]` — Create or update app
+- `hotify add --id <id> --name <n> --domain <d> --port <p> --cmd <c> [--backend-url <url>]` — Strict create (fails if exists)
 - `hotify remove --id <id>` — Delete app
 - `hotify list` — List all apps
 
@@ -93,6 +93,49 @@ hotify-cli setup-traefik --id myapp --local
 
 **Available Permissions**: `deploy`, `start`, `stop`, `restart`, `logs`, `config`, `admin`, `all`, `*`
 **Note**: Permissions are fully enforced at server level as of v2.7.4. Use `all` or `*` for full access.
+
+## External Reverse Proxy Support (v2.8.1+)
+
+Hotify-cli supports external reverse proxy targets, allowing apps to run on different machines while hotify handles DNS, TLS, and Traefik routing.
+
+### Use Cases
+- Apps running on different servers via Tailscale/VPN
+- Containerized apps on separate hosts
+- Microservices architectures across multiple machines
+
+### Usage
+```bash
+# Setup app with external backend URL
+hotify-cli setup \
+  --id myapp \
+  --name "My App" \
+  --domain myapp \
+  --port 3000 \
+  --cmd "/usr/local/bin/myapp start" \
+  --backend-url "http://100.114.4.57:8080"
+```
+
+When `--backend-url` is set:
+- Traefik routes to the specified URL instead of `http://127.0.0.1:<port>`
+- DNS and TLS certificate management still handled by hotify
+- Basic auth and other Traefik middleware still apply
+- The app can run on any reachable machine (local network, Tailscale, VPN)
+
+### Example: Tailscale Network
+```bash
+# App running on rbm2 container via Tailscale
+hotify-cli setup \
+  --id gitea-rbm2 \
+  --name "Gitea on rbm2" \
+  --domain gitea \
+  --port 3000 \
+  --cmd "/usr/local/bin/gitea start" \
+  --backend-url "http://100.114.4.57:3000"
+
+# Setup DNS and Traefik
+hotify-cli setup-dns --id gitea-rbm2
+hotify-cli setup-traefik --id gitea-rbm2
+```
 
 ## Architecture
 
@@ -153,7 +196,13 @@ hotify-cli api-keys --action add --name fullaccess --permissions "*"
 
 ## Version Information
 
-Current version: v2.7.4
+Current version: v2.8.1
+
+### v2.8.1 Features
+- **External reverse proxy support**: Apps can now run on external machines while hotify handles DNS, TLS, and Traefik routing
+- **--backend-url parameter**: Configure custom backend URLs for apps (e.g., http://100.114.4.57:8080)
+- **Web UI support**: Backend URL field added to add/edit app forms
+- **Traefik integration**: Automatic routing to custom backend URLs when configured
 
 ### v2.7.4 Features
 - Implemented server-side permission enforcement for all API endpoints
