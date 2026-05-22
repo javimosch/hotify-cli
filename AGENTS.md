@@ -1,4 +1,4 @@
-# Hotify CLI - Agent Documentation (v2.7.3)
+# Hotify CLI - Agent Documentation (v2.8.1)
 
 ## Overview
 Hotify is a CLI+UI tool for managing Traefik/Cloudflare app deployment. It automates DNS setup, SSL certificates, and reverse proxy configuration for web apps.
@@ -28,6 +28,59 @@ deploy        File transfer only: --id --source required
 setup-dns     Create/update Cloudflare DNS A record: --id --ip (auto-detected if omitted)
 setup-traefik Configure Traefik routing for an app: --id [--challenge-type http|dns]
 basic-auth    Manage Traefik HTTP basic auth credentials: --id --action add|remove|list
+
+## External Reverse Proxy Support
+
+Hotify-cli supports external reverse proxy targets, allowing apps to run on different machines while hotify handles DNS, TLS, and Traefik routing. This is useful for:
+- Apps running on different servers via Tailscale/VPN
+- Containerized apps on separate hosts
+- Microservices architectures across multiple machines
+
+### Usage
+
+Add the `--backend-url` parameter when setting up an app:
+
+```bash
+hotify-cli setup \
+  --id myapp \
+  --name "My App" \
+  --domain myapp \
+  --port 3000 \
+  --cmd "/usr/local/bin/myapp start" \
+  --backend-url "http://100.114.4.57:8080"
+```
+
+When `--backend-url` is set:
+- Traefik will route traffic to the specified URL instead of `http://127.0.0.1:<port>`
+- The app can run on any reachable machine (local network, Tailscale, VPN)
+- DNS and TLS certificate management still handled by hotify
+- Basic auth and other Traefik middleware still apply
+
+### Example: Tailscale Network
+
+```bash
+# App running on rbm2 container via Tailscale
+hotify-cli setup \
+  --id gitea-rbm2 \
+  --name "Gitea on rbm2" \
+  --domain gitea \
+  --port 3000 \
+  --cmd "/usr/local/bin/gitea start" \
+  --backend-url "http://100.114.4.57:3000"
+
+# Setup DNS and Traefik
+hotify-cli setup-dns --id gitea-rbm2
+hotify-cli setup-traefik --id gitea-rbm2
+```
+
+### Notes
+
+- The `--port` parameter is still required for validation but not used when `--backend-url` is set
+- Backend URL must be reachable from the Traefik server
+- Supports HTTP/HTTPS URLs
+- Can be updated using `hotify-cli setup --id <app> --backend-url <new-url>`
+
+## Cleanup
 
 prune         Cleanup DNS/Traefik: --id <app> or --all
 

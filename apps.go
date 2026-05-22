@@ -31,6 +31,7 @@ func setupApp(isUpsert bool) {
 	ip := cmd.String("ip", "", "Server IP for DNS (auto-detected if omitted)")
 	composeFile := cmd.String("compose-file", "", "Docker Compose file to use (e.g. compose.binary.yml)")
 	composePath := cmd.String("compose-path", "", "Path on remote where compose files live")
+	backendURL := cmd.String("backend-url", "", "Custom backend URL for external reverse proxy (e.g. http://100.114.4.57:8080)")
 	cmd.Parse(filterHumanFlag(os.Args[2:]))
 
 	if *id == "" {
@@ -94,6 +95,9 @@ func setupApp(isUpsert bool) {
 		if *composePath != "" {
 			app.ComposePath = *composePath
 		}
+		if *backendURL != "" {
+			app.BackendURL = *backendURL
+		}
 		config.Apps[existingIdx] = app
 	} else {
 		// New app — all required fields must be present
@@ -120,6 +124,7 @@ func setupApp(isUpsert bool) {
 			Status:      "stopped",
 			ComposeFile: *composeFile,
 			ComposePath: *composePath,
+			BackendURL:  *backendURL,
 		})
 		existingIdx = len(config.Apps) - 1
 	}
@@ -165,6 +170,7 @@ func setupApp(isUpsert bool) {
 			"cmd":          app.Command,
 			"compose_file": app.ComposeFile,
 			"compose_path": app.ComposePath,
+			"backend_url":  app.BackendURL,
 		},
 		Metadata: map[string]interface{}{
 			"warnings": warnings,
@@ -281,6 +287,7 @@ func listApps() {
 			"status":       app.Status,
 			"compose_file": app.ComposeFile,
 			"compose_path": app.ComposePath,
+			"backend_url":  app.BackendURL,
 		})
 	}
 
@@ -302,6 +309,9 @@ func listApps() {
 			}
 			if app.ComposeFile != "" {
 				fmt.Printf("  Compose: %s (at %s)\n", app.ComposeFile, app.ComposePath)
+			}
+			if app.BackendURL != "" {
+				fmt.Printf("  Backend: %s\n", app.BackendURL)
 			}
 			fmt.Printf("  Status: %s\n", app.Status)
 			fmt.Println()

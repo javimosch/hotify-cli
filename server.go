@@ -353,6 +353,7 @@ func handleHome(w http.ResponseWriter, r *http.Request) {
         <div class="form-group"><label class="form-label">Port</label><input type="number" id="editAppPort" class="form-input"></div>
         <div class="form-group"><label class="form-label">Command</label><input type="text" id="editAppCommand" class="form-input"></div>
         <div class="form-group"><label class="form-label">Source</label><input type="text" id="editAppSource" class="form-input" placeholder="optional"></div>
+        <div class="form-group"><label class="form-label">Backend URL</label><input type="text" id="editAppBackendURL" class="form-input" placeholder="http://100.114.4.57:8080 (optional)"></div>
         <div class="modal-actions">
             <button class="btn btn-ghost" onclick="closeEditModal()">Cancel</button>
             <button class="btn btn-primary" onclick="editApp()">Save</button>
@@ -370,6 +371,7 @@ func handleHome(w http.ResponseWriter, r *http.Request) {
         <div class="form-group"><label class="form-label">Port</label><input type="number" id="appPort" class="form-input" placeholder="3000"></div>
         <div class="form-group"><label class="form-label">Command</label><input type="text" id="appCommand" class="form-input" placeholder="/path/to/app start"></div>
         <div class="form-group"><label class="form-label">Source</label><input type="text" id="appSource" class="form-input" placeholder="github.com/user/repo (optional)"></div>
+        <div class="form-group"><label class="form-label">Backend URL</label><input type="text" id="appBackendURL" class="form-input" placeholder="http://100.114.4.57:8080 (optional)"></div>
         <div class="modal-actions">
             <button class="btn btn-ghost" onclick="closeAddModal()">Cancel</button>
             <button class="btn btn-primary" onclick="addApp()">Add</button>
@@ -608,12 +610,13 @@ func handleHome(w http.ResponseWriter, r *http.Request) {
     function openEditModalById(id) {
         var app = _appsCache.find(function(a) { return a.id === id; });
         if (!app) return;
-        document.getElementById('editAppId').value      = app.id;
-        document.getElementById('editAppName').value    = app.name    || '';
-        document.getElementById('editAppDomain').value  = app.domain  || '';
-        document.getElementById('editAppPort').value    = app.port    || '';
-        document.getElementById('editAppCommand').value = app.command || '';
-        document.getElementById('editAppSource').value  = app.source  || '';
+        document.getElementById('editAppId').value        = app.id;
+        document.getElementById('editAppName').value      = app.name    || '';
+        document.getElementById('editAppDomain').value    = app.domain  || '';
+        document.getElementById('editAppPort').value      = app.port    || '';
+        document.getElementById('editAppCommand').value   = app.command || '';
+        document.getElementById('editAppSource').value    = app.source  || '';
+        document.getElementById('editAppBackendURL').value = app.backend_url || '';
         document.getElementById('editModal').classList.add('active');
     }
 
@@ -628,12 +631,13 @@ func handleHome(w http.ResponseWriter, r *http.Request) {
 
     function editApp() {
         var app = {
-            id:      document.getElementById('editAppId').value,
-            name:    document.getElementById('editAppName').value,
-            domain:  document.getElementById('editAppDomain').value,
-            port:    parseInt(document.getElementById('editAppPort').value) || 0,
-            command: document.getElementById('editAppCommand').value,
-            source:  document.getElementById('editAppSource').value
+            id:         document.getElementById('editAppId').value,
+            name:       document.getElementById('editAppName').value,
+            domain:     document.getElementById('editAppDomain').value,
+            port:       parseInt(document.getElementById('editAppPort').value) || 0,
+            command:    document.getElementById('editAppCommand').value,
+            source:     document.getElementById('editAppSource').value,
+            backend_url: document.getElementById('editAppBackendURL').value
         };
         apiFetch('/api/apps/edit', { method: 'POST', json: true, body: JSON.stringify(app) })
             .then(function(d) { if (d.success) { closeEditModal(); loadAll(); } else alert(d.error); })
@@ -642,12 +646,13 @@ func handleHome(w http.ResponseWriter, r *http.Request) {
 
     function addApp() {
         var app = {
-            id:      document.getElementById('appId').value,
-            name:    document.getElementById('appName').value,
-            domain:  document.getElementById('appDomain').value,
-            port:    parseInt(document.getElementById('appPort').value),
-            command: document.getElementById('appCommand').value,
-            source:  document.getElementById('appSource').value
+            id:         document.getElementById('appId').value,
+            name:       document.getElementById('appName').value,
+            domain:     document.getElementById('appDomain').value,
+            port:       parseInt(document.getElementById('appPort').value),
+            command:    document.getElementById('appCommand').value,
+            source:     document.getElementById('appSource').value,
+            backend_url: document.getElementById('appBackendURL').value
         };
         apiFetch('/api/apps/add', { method: 'POST', json: true, body: JSON.stringify(app) })
             .then(function(d) { if (d.success) { closeAddModal(); loadAll(); } else alert(d.error); })
@@ -859,12 +864,13 @@ func handleAddAppAPI(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var app struct {
-		ID      string `json:"id"`
-		Name    string `json:"name"`
-		Domain  string `json:"domain"`
-		Port    int    `json:"port"`
-		Command string `json:"command"`
-		Source  string `json:"source"`
+		ID         string `json:"id"`
+		Name       string `json:"name"`
+		Domain     string `json:"domain"`
+		Port       int    `json:"port"`
+		Command    string `json:"command"`
+		Source     string `json:"source"`
+		BackendURL string `json:"backend_url"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&app); err != nil {
@@ -892,13 +898,14 @@ func handleAddAppAPI(w http.ResponseWriter, r *http.Request) {
 
 	// Add app to config
 	newApp := App{
-		ID:      app.ID,
-		Name:    app.Name,
-		Domain:  fullDomain,
-		Port:    app.Port,
-		Command: app.Command,
-		Source:  app.Source,
-		Status:  "stopped",
+		ID:         app.ID,
+		Name:       app.Name,
+		Domain:     fullDomain,
+		Port:       app.Port,
+		Command:    app.Command,
+		Source:     app.Source,
+		Status:     "stopped",
+		BackendURL: app.BackendURL,
 	}
 
 	config.Apps = append(config.Apps, newApp)
@@ -919,12 +926,13 @@ func handleEditAppAPI(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var app struct {
-		ID      string `json:"id"`
-		Name    string `json:"name"`
-		Domain  string `json:"domain"`
-		Port    int    `json:"port"`
-		Command string `json:"command"`
-		Source  string `json:"source"`
+		ID         string `json:"id"`
+		Name       string `json:"name"`
+		Domain     string `json:"domain"`
+		Port       int    `json:"port"`
+		Command    string `json:"command"`
+		Source     string `json:"source"`
+		BackendURL string `json:"backend_url"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&app); err != nil {
@@ -957,6 +965,9 @@ func handleEditAppAPI(w http.ResponseWriter, r *http.Request) {
 			}
 			if app.Source != "" {
 				config.Apps[i].Source = app.Source
+			}
+			if app.BackendURL != "" {
+				config.Apps[i].BackendURL = app.BackendURL
 			}
 			break
 		}

@@ -292,7 +292,12 @@ func updateDynamicConfig(config *Config) error {
 		sb.WriteString(fmt.Sprintf("    %s:\n", app.ID))
 		sb.WriteString("      loadBalancer:\n")
 		sb.WriteString("        servers:\n")
-		sb.WriteString(fmt.Sprintf("          - url: \"http://127.0.0.1:%d\"\n\n", app.Port))
+		// Use custom backend URL if provided, otherwise default to localhost
+		if app.BackendURL != "" {
+			sb.WriteString(fmt.Sprintf("          - url: \"%s\"\n\n", app.BackendURL))
+		} else {
+			sb.WriteString(fmt.Sprintf("          - url: \"http://127.0.0.1:%d\"\n\n", app.Port))
+		}
 	}
 
 	// Emit middlewares section only for apps that have basicAuth entries

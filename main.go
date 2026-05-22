@@ -5,7 +5,7 @@ import (
 	"os"
 )
 
-const Version = "2.7.4"
+const Version = "2.8.1"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -118,6 +118,10 @@ func printHelp() {
 	fmt.Println("  remove          Remove app from config (warns about DNS/Traefik cleanup)")
 	fmt.Println("  list            List all configured apps")
 	fmt.Println()
+	fmt.Println("External Reverse Proxy:")
+	fmt.Println("  --backend-url   Custom backend URL for external apps (e.g., http://100.114.4.57:8080)")
+	fmt.Println("                  When set, Traefik routes to this URL instead of localhost:<port>")
+	fmt.Println()
 	fmt.Println("Process Management (--id targets a remote app; no --id targets hotify daemon):")
 	fmt.Println("  start           Start app or hotify daemon (--daemon for daemon mode)")
 	fmt.Println("  stop            Stop app or hotify daemon")
@@ -195,6 +199,9 @@ func printHelp() {
 	fmt.Println("  hotify-cli setup --id myapp --name 'My App' --domain myapp --port 3000 --cmd '/usr/local/bin/myapp start'")
 	fmt.Println("  hotify-cli setup --id myapp --port 4000   # update port only")
 	fmt.Println("  hotify-cli setup --id myapp --domain myapp --port 3000 --setup-dns  # with auto DNS")
+	fmt.Println()
+	fmt.Println("  # Setup app with external backend (e.g., Tailscale network)")
+	fmt.Println("  hotify-cli setup --id myapp --name 'My App' --domain myapp --port 3000 --cmd '/usr/local/bin/myapp start' --backend-url 'http://100.114.4.57:8080'")
 	fmt.Println()
 	fmt.Println("  # Setup Docker Compose app")
 	fmt.Println("  hotify-cli setup --id cmdcenter --name 'CmdCenter' --domain cmdcenter --port 3031 --cmd 'docker compose up -d' --compose-file compose.binary.yml --compose-path /home/dk1/cmdcenter")

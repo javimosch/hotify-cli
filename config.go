@@ -151,6 +151,10 @@ type App struct {
 	// Traefik basic auth — htpasswd-format entries ("user:$apr1$...")
 	// Populated via: hotify-cli basic-auth --id <app> --action add --user <u> --password <p>
 	BasicAuth []string `json:"basic_auth,omitempty"`
+	// Backend URL for external reverse proxy targets
+	// If set, Traefik will route to this URL instead of http://127.0.0.1:<port>
+	// Example: "http://100.114.4.57:8080" for Tailscale network
+	BackendURL string `json:"backend_url,omitempty"`
 }
 
 func getConfigPath() (string, error) {
