@@ -196,7 +196,13 @@ hotify-cli api-keys --action add --name fullaccess --permissions "*"
 
 ## Version Information
 
-Current version: v2.8.1
+Current version: v2.8.2
+
+### v2.8.2 Features
+- **Bug fix**: Fixed APR1-MD5 hash generation for basic-auth
+- Now uses OpenSSL command for correct APR1-MD5 hash generation
+- Ensures compatibility with Traefik basic auth middleware
+- Resolves hash mismatch issues reported by rbm2 agent
 
 ### v2.8.1 Features
 - **External reverse proxy support**: Apps can now run on external machines while hotify handles DNS, TLS, and Traefik routing

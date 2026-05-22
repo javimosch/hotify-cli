@@ -37,11 +37,11 @@ func apr1Encode64(src []byte, n int) string {
 		w := 0
 		nBytes := 0
 		for j := 0; j < 3 && i+j < n; j++ {
-			w |= int(src[i+j]) << (16 - j*8)
+			w |= int(src[i+j]) << (j * 8)
 			nBytes++
 		}
 		for j := 0; j < nBytes+1; j++ {
-			result.WriteByte(apr1Alphabet[(w>>uint(18-j*6))&0x3f])
+			result.WriteByte(apr1Alphabet[(w>>uint(j*6))&0x3f])
 		}
 	}
 	return result.String()
@@ -130,10 +130,28 @@ func hashAPR1WithSalt(password, salt string) (string, error) {
 
 // HtpasswdEntry returns a full htpasswd line: "user:$apr1$salt$hash"
 func HtpasswdEntry(user, password string) (string, error) {
-	hash, err := HashAPR1(password)
-	if err != nil {
-		return "", err
+	// Generate random salt (8 characters for APR1-MD5)
+	saltBytes := make([]byte, 8)
+	if _, err := rand.Read(saltBytes); err != nil {
+		return "", fmt.Errorf("error generating salt: %v", err)
 	}
+	
+	// Encode salt to printable apr1 alphabet
+	saltStr := ""
+	for _, b := range saltBytes {
+		saltStr += string(apr1Alphabet[int(b)%len(apr1Alphabet)])
+	}
+	
+	// Use openssl command for correct APR1-MD5 generation
+	// This is a temporary fix for the APR1-MD5 implementation bug
+	cmd := exec.Command("openssl", "passwd", "-apr1", "-salt", saltStr, password)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("openssl command failed: %v", err)
+	}
+	
+	// Parse the output which should be in format: $apr1$salt$hash
+	hash := strings.TrimSpace(string(output))
 	return fmt.Sprintf("%s:%s", user, hash), nil
 }
 
