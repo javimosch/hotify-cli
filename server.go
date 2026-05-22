@@ -261,6 +261,12 @@ func handleHome(w http.ResponseWriter, r *http.Request) {
         .modal-actions { display: flex; gap: 8px; margin-top: 20px; justify-content: flex-end; }
         .error-msg { display: none; font-size: 12px; color: var(--red-text); background: var(--red-bg); padding: 8px 11px; border-radius: var(--radius-sm); margin-bottom: 12px; }
 
+        /* ── Privacy mode ── */
+        .sensitive { transition: filter 0.2s; }
+        .privacy-mode .sensitive { filter: blur(5px); user-select: none; pointer-events: none; }
+        .privacy-mode .sensitive:hover { filter: none; pointer-events: auto; }
+        .btn-privacy.active { background: #F7F6F3; color: var(--text-primary); border-color: #D4D4D4; }
+
         /* ── Footer ── */
         .site-footer {
             border-top: 1px solid var(--border);
@@ -313,7 +319,12 @@ func handleHome(w http.ResponseWriter, r *http.Request) {
             </svg>
             Hotify
         </div>
-        <div>
+        <div style="display:flex;gap:8px;align-items:center;">
+            <button id="privacyBtn" class="btn btn-ghost btn-privacy" onclick="togglePrivacy()" title="Toggle privacy mode">
+                <svg id="privacyIconEye" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                <svg id="privacyIconEyeOff" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                Privacy
+            </button>
             <button class="btn btn-ghost" onclick="logout()">Sign out</button>
         </div>
     </header>
@@ -370,6 +381,25 @@ func handleHome(w http.ResponseWriter, r *http.Request) {
     let authToken = localStorage.getItem('hotify_token') || '';
     let _appsCache = [];
     let _remoteMap = {};
+    let _privacyMode = localStorage.getItem('hotify_privacy') === '1';
+
+    function togglePrivacy() {
+        _privacyMode = !_privacyMode;
+        localStorage.setItem('hotify_privacy', _privacyMode ? '1' : '0');
+        applyPrivacyMode();
+    }
+
+    function applyPrivacyMode() {
+        document.body.classList.toggle('privacy-mode', _privacyMode);
+        var btn = document.getElementById('privacyBtn');
+        if (btn) btn.classList.toggle('active', _privacyMode);
+        var eye    = document.getElementById('privacyIconEye');
+        var eyeOff = document.getElementById('privacyIconEyeOff');
+        if (eye)    eye.style.display    = _privacyMode ? 'none' : '';
+        if (eyeOff) eyeOff.style.display = _privacyMode ? ''     : 'none';
+    }
+
+    applyPrivacyMode();
 
     // ── Icons ──────────────────────────────────────
     const ICON_MONITOR = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>';
@@ -476,13 +506,14 @@ func handleHome(w http.ResponseWriter, r *http.Request) {
         document.getElementById('sections').innerHTML = html;
     }
 
-    function metaItem(label, value) {
-        return '<div class="meta-item"><div class="meta-label">' + label + '</div><div class="meta-value">' + value + '</div></div>';
+    function metaItem(label, value, sensitive) {
+        var cls = sensitive ? ' sensitive' : '';
+        return '<div class="meta-item"><div class="meta-label">' + label + '</div><div class="meta-value' + cls + '">' + value + '</div></div>';
     }
 
     function renderLocalSection(cfg, apps) {
-        var meta = metaItem('Domain', cfg.domain || '—') +
-                   metaItem('Email', cfg.admin_email || '—') +
+        var meta = metaItem('Domain', cfg.domain || '—', true) +
+                   metaItem('Email', cfg.admin_email || '—', true) +
                    metaItem('Cloudflare', cfg.cloudflare_token ? '••••••••' : 'Not set');
         return '<div class="target-section">' +
             '<div class="target-header">' +
@@ -503,8 +534,8 @@ func handleHome(w http.ResponseWriter, r *http.Request) {
                 : '<span class="badge badge-stopped"><span class="badge-dot"></span>unreachable</span>';
             meta = '<div class="target-meta">' +
                 metaItem('Status', reachBadge) +
-                metaItem('Domain', rc.domain || '—') +
-                metaItem('Email', rc.admin_email || '—') +
+                metaItem('Domain', rc.domain || '—', true) +
+                metaItem('Email', rc.admin_email || '—', true) +
                 metaItem('Cloudflare', rc.cloudflare_set ? '••••••••' : 'Not set') +
                 '</div>';
         }
@@ -512,7 +543,7 @@ func handleHome(w http.ResponseWriter, r *http.Request) {
             '<div class="target-header">' +
             '<div class="target-icon">' + ICON_SERVER + '</div>' +
             '<span class="target-name">' + remote.name + '</span>' +
-            '<a href="' + remote.url + '" target="_blank" rel="noopener" class="target-url">' + remote.url + '</a>' +
+            '<a href="' + remote.url + '" target="_blank" rel="noopener" class="target-url sensitive">' + remote.url + '</a>' +
             '<div class="target-header-actions"><button class="btn btn-primary" onclick="openAddModal()">' + ICON_PLUS + 'Add app</button></div>' +
             '</div>' +
             meta +
@@ -545,11 +576,11 @@ func handleHome(w http.ResponseWriter, r *http.Request) {
         var id = app.id;
         var domain = app.domain || '';
         var domainLink = domain
-            ? '<a href="https://' + domain + '" target="_blank" rel="noopener" class="app-domain">' + ICON_LINK + ' ' + domain + '</a>'
+            ? '<a href="https://' + domain + '" target="_blank" rel="noopener" class="app-domain sensitive">' + ICON_LINK + ' ' + domain + '</a>'
             : '<span class="app-domain" style="color:var(--text-muted)">No domain</span>';
         var iurl = internalURL(app);
         var internalLink = iurl
-            ? '<a href="' + iurl + '" target="_blank" rel="noopener" class="app-internal">' + ICON_LAN + ' ' + iurl + '</a>'
+            ? '<a href="' + iurl + '" target="_blank" rel="noopener" class="app-internal sensitive">' + ICON_LAN + ' ' + iurl + '</a>'
             : '';
         return '<div class="app-card">' +
             '<div class="app-card-top">' +
