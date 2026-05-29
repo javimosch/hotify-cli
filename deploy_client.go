@@ -130,10 +130,12 @@ func (d *DeploymentClient) BasicAuthList(appID string) (map[string]interface{}, 
 }
 
 // SetupTraefikApp configures Traefik for a specific app remotely.
-func (d *DeploymentClient) SetupTraefikApp(appID, challengeType string) error {
-	return d.HTTPClient.Post(fmt.Sprintf("/api/remote/apps/%s/setup-traefik", appID), map[string]interface{}{
+func (d *DeploymentClient) SetupTraefikApp(appID, challengeType string, noRedirect bool) error {
+	payload := map[string]interface{}{
 		"challenge_type": challengeType,
-	})
+		"no_redirect":    noRedirect,
+	}
+	return d.HTTPClient.Post(fmt.Sprintf("/api/remote/apps/%s/setup-traefik", appID), payload)
 }
 
 // SetupDNSApp configures DNS for a specific app remotely.

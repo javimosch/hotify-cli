@@ -296,11 +296,13 @@ func handleBasicAuthRemoteAPI(w http.ResponseWriter, r *http.Request, appID stri
 // Request body:
 //
 //	{
-//	  "challenge_type": "http|dns"
+//	  "challenge_type": "http|dns",
+//	  "no_redirect": false
 //	}
 func handleSetupTraefikRemoteAPI(w http.ResponseWriter, r *http.Request, appID string) {
 	var payload struct {
 		ChallengeType string `json:"challenge_type"`
+		NoRedirect    bool   `json:"no_redirect"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -318,7 +320,16 @@ func handleSetupTraefikRemoteAPI(w http.ResponseWriter, r *http.Request, appID s
 		return
 	}
 
-	if err := setupTraefikForAppWithChallenge(appID, ct, false); err != nil {
+	var err error
+	if payload.NoRedirect {
+		// Use explicit redirect control when flag is provided
+		err = setupTraefikForAppWithChallengeAndRedirect(appID, ct, false, false)
+	} else {
+		// Use smart redirect handling by default
+		err = setupTraefikForAppWithChallenge(appID, ct, false)
+	}
+	
+	if err != nil {
 		auditLogger.LogEvent(AuditEvent{
 			EventType: AuditEventAuthFailed,
 			TokenName: r.Header.Get("X-API-Key-Name"),
@@ -337,10 +348,11 @@ func handleSetupTraefikRemoteAPI(w http.ResponseWriter, r *http.Request, appID s
 	})
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success":         true,
-		"app_id":          appID,
-		"challenge_type":  string(ct),
-		"action":          "traefik_configured",
+		"success":          true,
+		"app_id":           appID,
+		"challenge_type":   string(ct),
+		"redirect_enabled": !payload.NoRedirect,
+		"action":           "traefik_configured",
 	})
 }
 

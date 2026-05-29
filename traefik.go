@@ -3,11 +3,13 @@ package main
 import (
 	"crypto/md5"
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const (
@@ -184,7 +186,8 @@ func validateApp(app App) error {
 // setupTraefikConfig writes main traefik.yml and cloudflare.env.
 // challengeType controls the ACME challenge method (http or dns).
 // enableDocker adds the Docker provider for automatic container discovery.
-func setupTraefikConfig(config *Config, challengeType TraefikChallengeType, enableDocker bool) error {
+// enableRedirect controls whether HTTP-to-HTTPS redirect is enabled (default: true).
+func setupTraefikConfig(config *Config, challengeType TraefikChallengeType, enableDocker bool, enableRedirect bool) error {
 	if err := validateTraefikConfig(config); err != nil {
 		return fmt.Errorf("configuration validation failed: %v", err)
 	}
@@ -220,15 +223,10 @@ func setupTraefikConfig(config *Config, challengeType TraefikChallengeType, enab
     watch: true`
 	}
 
-	mainConfig := fmt.Sprintf(`global:
-  checkNewVersion: true
-  sendAnonymousUsage: false
-
-api:
-  dashboard: true
-  insecure: false
-
-entryPoints:
+	// Build the entryPoints block with optional redirect
+	var entryPointsBlock string
+	if enableRedirect {
+		entryPointsBlock = `entryPoints:
   web:
     address: ":80"
     http:
@@ -242,7 +240,28 @@ entryPoints:
     address: ":443"
     http:
       tls:
-        certResolver: letsencrypt
+        certResolver: letsencrypt`
+	} else {
+		entryPointsBlock = `entryPoints:
+  web:
+    address: ":80"
+
+  websecure:
+    address: ":443"
+    http:
+      tls:
+        certResolver: letsencrypt`
+	}
+
+	mainConfig := fmt.Sprintf(`global:
+  checkNewVersion: true
+  sendAnonymousUsage: false
+
+api:
+  dashboard: true
+  insecure: false
+
+%s
 
 certificatesResolvers:
   letsencrypt:
@@ -252,7 +271,7 @@ certificatesResolvers:
 %s
 
 %s
-`, config.AdminEmail, challengeBlock, providersBlock)
+`, entryPointsBlock, config.AdminEmail, challengeBlock, providersBlock)
 
 	if err := os.WriteFile(traefikMain, []byte(mainConfig), 0644); err != nil {
 		return fmt.Errorf("error writing traefik.yml: %v", err)
@@ -427,7 +446,13 @@ func setupTraefikForApp(appID string) error {
 }
 
 // setupTraefikForAppWithChallenge is the full path with explicit challenge choice.
+// Uses smart redirect handling for HTTP challenge to avoid ACME issues.
 func setupTraefikForAppWithChallenge(appID string, challengeType TraefikChallengeType, enableDocker bool) error {
+	return setupTraefikForAppWithSmartRedirect(appID, challengeType, enableDocker)
+}
+
+// setupTraefikForAppWithChallengeAndRedirect is the full path with explicit challenge and redirect control.
+func setupTraefikForAppWithChallengeAndRedirect(appID string, challengeType TraefikChallengeType, enableDocker bool, enableRedirect bool) error {
 	config, err := loadConfig()
 	if err != nil {
 		return err
@@ -450,7 +475,7 @@ func setupTraefikForAppWithChallenge(appID string, challengeType TraefikChalleng
 		return fmt.Errorf("app '%s' not found in configuration", appID)
 	}
 
-	if err := setupTraefikConfig(config, challengeType, enableDocker); err != nil {
+	if err := setupTraefikConfig(config, challengeType, enableDocker, enableRedirect); err != nil {
 		return fmt.Errorf("error setting up traefik config: %v", err)
 	}
 
@@ -470,7 +495,11 @@ func setupTraefikForAppWithChallenge(appID string, challengeType TraefikChalleng
 	if enableDocker {
 		dockerNote = " (Docker provider enabled)"
 	}
-	fmt.Printf("✅ Traefik configured for app: %s (challenge: %s)%s\n", appID, challengeType, dockerNote)
+	redirectNote := ""
+	if !enableRedirect {
+		redirectNote = " (HTTP redirect disabled)"
+	}
+	fmt.Printf("✅ Traefik configured for app: %s (challenge: %s)%s%s\n", appID, challengeType, dockerNote, redirectNote)
 	return nil
 }
 
@@ -485,8 +514,8 @@ func enableDockerProvider() error {
 		return err
 	}
 
-	// Use HTTP challenge (default) and enable Docker
-	if err := setupTraefikConfig(config, ChallengeHTTP, true); err != nil {
+	// Use HTTP challenge (default), enable Docker, and keep redirect enabled
+	if err := setupTraefikConfig(config, ChallengeHTTP, true, true); err != nil {
 		return fmt.Errorf("error setting up traefik config: %v", err)
 	}
 
@@ -509,8 +538,8 @@ func disableDockerProvider() error {
 		return err
 	}
 
-	// Use HTTP challenge (default) and disable Docker
-	if err := setupTraefikConfig(config, ChallengeHTTP, false); err != nil {
+	// Use HTTP challenge (default), disable Docker, and keep redirect enabled
+	if err := setupTraefikConfig(config, ChallengeHTTP, false, true); err != nil {
 		return fmt.Errorf("error setting up traefik config: %v", err)
 	}
 
@@ -520,4 +549,134 @@ func disableDockerProvider() error {
 
 	fmt.Println("✅ Docker provider disabled in Traefik")
 	return nil
+}
+
+// ─── ACME Certificate Verification ─────────────────────────────────────────────
+
+// ACMECertificate represents a certificate in acme.json
+type ACMECertificate struct {
+	Domain struct {
+		Main string   `json:"main"`
+		SANs []string `json:"sans,omitempty"`
+	} `json:"domain"`
+	Certificate string `json:"certificate"`
+	Key         string `json:"key"`
+}
+
+// ACMEData represents the structure of acme.json
+type ACMEData struct {
+	Letsencrypt struct {
+		Certificates []ACMECertificate `json:"Certificates"`
+	} `json:"letsencrypt"`
+}
+
+// checkCertificateForDomain checks if a valid certificate exists for the given domain
+func checkCertificateForDomain(domain string) (bool, error) {
+	acmePath := filepath.Join(traefikConfigDir, "acme.json")
+	
+	// Read acme.json
+	data, err := os.ReadFile(acmePath)
+	if err != nil {
+		return false, fmt.Errorf("failed to read acme.json: %v", err)
+	}
+
+	var acmeData ACMEData
+	if err := json.Unmarshal(data, &acmeData); err != nil {
+		return false, fmt.Errorf("failed to parse acme.json: %v", err)
+	}
+
+	// Check if certificate exists for the domain
+	for _, cert := range acmeData.Letsencrypt.Certificates {
+		if cert.Domain.Main == domain {
+			return true, nil
+		}
+		// Also check SANs (Subject Alternative Names)
+		for _, san := range cert.Domain.SANs {
+			if san == domain {
+				return true, nil
+			}
+		}
+	}
+
+	return false, nil
+}
+
+// waitForCertificate waits for a certificate to be issued for the given domain
+func waitForCertificate(domain string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	
+	for time.Now().Before(deadline) {
+		hasCert, err := checkCertificateForDomain(domain)
+		if err != nil {
+			return fmt.Errorf("error checking certificate: %v", err)
+		}
+		if hasCert {
+			return nil
+		}
+		
+		// Wait 2 seconds before checking again
+		time.Sleep(2 * time.Second)
+	}
+	
+	return fmt.Errorf("timeout waiting for certificate for domain %s", domain)
+}
+
+// setupTraefikForAppWithSmartRedirect handles ACME challenge redirect automatically
+// When using HTTP challenge, it temporarily disables redirect, obtains certificate, then re-enables redirect
+func setupTraefikForAppWithSmartRedirect(appID string, challengeType TraefikChallengeType, enableDocker bool) error {
+	config, err := loadConfig()
+	if err != nil {
+		return err
+	}
+
+	// Find the app's domain
+	var appDomain string
+	found := false
+	for _, app := range config.Apps {
+		if app.ID == appID {
+			found = true
+			appDomain = app.Domain
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("app '%s' not found in configuration", appID)
+	}
+
+	// Check if certificate already exists
+	hasCert, _ := checkCertificateForDomain(appDomain)
+	
+	// If using HTTP challenge and certificate doesn't exist, use smart redirect handling
+	if challengeType == ChallengeHTTP && !hasCert {
+		fmt.Printf("🔧 Using HTTP challenge - temporarily disabling redirect for ACME...\n")
+		
+		// Step 1: Setup without redirect
+		if err := setupTraefikForAppWithChallengeAndRedirect(appID, challengeType, enableDocker, false); err != nil {
+			return fmt.Errorf("failed to setup Traefik without redirect: %v", err)
+		}
+		
+		// Step 2: Wait for certificate (with timeout)
+		fmt.Printf("⏳ Waiting for certificate generation (max 60s)...\n")
+		if err := waitForCertificate(appDomain, 60*time.Second); err != nil {
+			// Certificate generation failed - re-enable redirect before returning error
+			fmt.Printf("⚠️ Certificate generation failed: %v\n", err)
+			fmt.Printf("🔧 Re-enabling redirect...\n")
+			setupTraefikForAppWithChallengeAndRedirect(appID, challengeType, enableDocker, true)
+			return fmt.Errorf("certificate generation failed: %v (consider using --challenge-type dns)", err)
+		}
+		
+		fmt.Printf("✅ Certificate obtained successfully\n")
+		
+		// Step 3: Re-enable redirect
+		fmt.Printf("🔧 Re-enabling HTTP-to-HTTPS redirect...\n")
+		if err := setupTraefikForAppWithChallengeAndRedirect(appID, challengeType, enableDocker, true); err != nil {
+			return fmt.Errorf("failed to re-enable redirect: %v", err)
+		}
+		
+		fmt.Printf("✅ Traefik configured with redirect for app: %s\n", appID)
+		return nil
+	}
+	
+	// For DNS challenge or existing certificates, use normal setup
+	return setupTraefikForAppWithChallengeAndRedirect(appID, challengeType, enableDocker, true)
 }

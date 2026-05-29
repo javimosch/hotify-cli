@@ -115,12 +115,13 @@ func handleSetupDNSCLI() {
 	}, format)
 }
 
-// handleSetupTraefikCLI handles: hotify-cli setup-traefik --id <id> [--challenge-type http|dns] [--target <name>] [--local]
+// handleSetupTraefikCLI handles: hotify-cli setup-traefik --id <id> [--challenge-type http|dns] [--no-redirect] [--target <name>] [--local]
 func handleSetupTraefikCLI() {
 	format := getOutputFormat()
 	cmd := flag.NewFlagSet("setup-traefik", flag.ExitOnError)
 	id := cmd.String("id", "", "App ID (required)")
 	challengeType := cmd.String("challenge-type", "http", "ACME challenge type: http or dns (default: http)")
+	noRedirect := cmd.Bool("no-redirect", false, "Disable HTTP-to-HTTPS redirect (useful for ACME troubleshooting)")
 	target := cmd.String("target", "", "Target name (uses default if not specified)")
 	local := cmd.Bool("local", false, "Execute directly on local server")
 	cmd.Parse(filterHumanFlag(os.Args[2:]))
@@ -166,7 +167,16 @@ func handleSetupTraefikCLI() {
 
 	if *local {
 		// Local mode: execute directly on local server
-		if err := setupTraefikForAppWithChallenge(*id, ct, false); err != nil {
+		var err error
+		if *noRedirect {
+			// Use explicit redirect control when flag is provided
+			err = setupTraefikForAppWithChallengeAndRedirect(*id, ct, false, false)
+		} else {
+			// Use smart redirect handling by default
+			err = setupTraefikForAppWithChallenge(*id, ct, false)
+		}
+		
+		if err != nil {
 			printOutput(CommandResult{
 				Version: Version, Success: false,
 				Error: &CommandError{
@@ -177,6 +187,8 @@ func handleSetupTraefikCLI() {
 						"Check Traefik is installed: hotify-cli traefik-system --status",
 						"Verify app config: hotify-cli list",
 						"Check Traefik logs: sudo journalctl -u traefik -f",
+						"Try --challenge-type dns if HTTP challenge fails",
+						"Try --no-redirect for ACME troubleshooting",
 					},
 				},
 			}, format)
@@ -188,6 +200,7 @@ func handleSetupTraefikCLI() {
 			Data: map[string]interface{}{
 				"app_id":         *id,
 				"challenge_type": string(ct),
+				"redirect_enabled": !*noRedirect,
 				"action":         "traefik_configured",
 			},
 		}, format)
@@ -205,7 +218,7 @@ func handleSetupTraefikCLI() {
 		exitClientError(format, err)
 	}
 
-	if err := client.SetupTraefikApp(*id, string(ct)); err != nil {
+	if err := client.SetupTraefikApp(*id, string(ct), *noRedirect); err != nil {
 		printOutput(CommandResult{
 			Version: Version, Success: false,
 			Error: &CommandError{
@@ -216,6 +229,8 @@ func handleSetupTraefikCLI() {
 					"Check target connectivity",
 					"Verify hotify daemon is running on remote",
 					"Check app exists on remote",
+					"Try --challenge-type dns if HTTP challenge fails",
+					"Try --no-redirect for ACME troubleshooting",
 				},
 			},
 		}, format)
@@ -226,10 +241,11 @@ func handleSetupTraefikCLI() {
 		Version: Version,
 		Success: true,
 		Data: map[string]interface{}{
-			"app_id":         *id,
-			"target":          targetObj.Name,
-			"challenge_type":  string(ct),
-			"action":          "traefik_configured",
+			"app_id":           *id,
+			"target":            targetObj.Name,
+			"challenge_type":    string(ct),
+			"redirect_enabled":  !*noRedirect,
+			"action":            "traefik_configured",
 		},
 	}, format)
 }

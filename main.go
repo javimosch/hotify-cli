@@ -5,7 +5,7 @@ import (
 	"os"
 )
 
-const Version = "2.8.2"
+const Version = "2.9.0"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -84,6 +84,10 @@ func main() {
 	case "basic-auth":
 		handleBasicAuth()
 
+	// Import existing Traefik configuration
+	case "import-traefik":
+		initImportTraefik()
+
 	// Remote target & auth management
 	case "auth":
 		handleAuth()
@@ -143,6 +147,8 @@ func printHelp() {
 	fmt.Println("                  --id <app> --action remove --user <u>")
 	fmt.Println("                  --id <app> --action list")
 	fmt.Println("                  Then run setup-traefik to apply changes")
+	fmt.Println()
+	fmt.Println("  import-traefik  Import existing Traefik configuration into hotify")
 	fmt.Println()
 	fmt.Println("Docker:")
 	fmt.Println("  docker list              List all containers")
