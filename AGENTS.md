@@ -1,4 +1,4 @@
-# Hotify CLI - Agent Documentation (v2.8.2)
+# Hotify CLI - Agent Documentation (v2.9.0)
 
 ## Overview
 Hotify is a CLI+UI tool for managing Traefik/Cloudflare app deployment. It automates DNS setup, SSL certificates, and reverse proxy configuration for web apps.
@@ -59,18 +59,18 @@ When `--backend-url` is set:
 ### Example: Tailscale Network
 
 ```bash
-# App running on rbm2 container via Tailscale
+# App running on remote container via Tailscale
 hotify-cli setup \
-  --id gitea-rbm2 \
-  --name "Gitea on rbm2" \
-  --domain gitea \
+  --id remote-app \
+  --name "Remote App" \
+  --domain app.example.com \
   --port 3000 \
-  --cmd "/usr/local/bin/gitea start" \
-  --backend-url "http://100.114.4.57:3000"
+  --cmd "/usr/local/bin/app start" \
+  --backend-url "http://<tailscale-ip>:3000"
 
 # Setup DNS and Traefik
-hotify-cli setup-dns --id gitea-rbm2
-hotify-cli setup-traefik --id gitea-rbm2
+hotify-cli setup-dns --id remote-app
+hotify-cli setup-traefik --id remote-app
 ```
 
 ### Notes
@@ -79,6 +79,33 @@ hotify-cli setup-traefik --id gitea-rbm2
 - Backend URL must be reachable from the Traefik server
 - Supports HTTP/HTTPS URLs
 - Can be updated using `hotify-cli setup --id <app> --backend-url <new-url>`
+
+### Remote Service Proxying Best Practices
+
+**Service Binding**
+- Bind backend services to `0.0.0.0` instead of `127.0.0.1` for remote access
+- Verify with `ss -tlnp | grep <port>` (should show 0.0.0.0, not 127.0.0.1)
+- Use authentication (passwords, basic auth) when binding to 0.0.0.0
+
+**ACME Certificate Timing**
+- Wait 10-30 seconds after Traefik setup before testing domain access
+- Let's Encrypt certificate generation takes time to complete
+- Verify certificate in `/etc/traefik/acme.json` before testing
+
+**Local Flag Usage**
+- Use `--local` flag for DNS/Traefik setup when remote daemon has auth issues
+- Local mode executes directly on the machine, avoiding remote API authentication
+- Example: `hotify-cli setup-dns --id <app> --ip <ip> --local`
+
+**Domain Naming Patterns**
+- Use descriptive subdomains for multi-machine deployments
+- Examples: `app-server1.example.com`, `app-server2.example.com`
+- Benefits: Clear service location identification, prevents domain conflicts
+
+**Network Connectivity**
+- Verify proxy server can reach backend service before hotify setup
+- Test with: `ssh <proxy-server> "curl -s http://<backend-ip>:<port>/health"`
+- Common pattern: Use public server as proxy for private containers/machines via Tailscale
 
 ## Cleanup
 

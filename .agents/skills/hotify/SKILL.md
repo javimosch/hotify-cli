@@ -123,19 +123,45 @@ When `--backend-url` is set:
 
 ### Example: Tailscale Network
 ```bash
-# App running on rbm2 container via Tailscale
+# App running on remote container via Tailscale
 hotify-cli setup \
-  --id gitea-rbm2 \
-  --name "Gitea on rbm2" \
-  --domain gitea \
+  --id remote-app \
+  --name "Remote App" \
+  --domain app.example.com \
   --port 3000 \
-  --cmd "/usr/local/bin/gitea start" \
-  --backend-url "http://100.114.4.57:3000"
+  --cmd "/usr/local/bin/app start" \
+  --backend-url "http://<tailscale-ip>:3000"
 
 # Setup DNS and Traefik
-hotify-cli setup-dns --id gitea-rbm2
-hotify-cli setup-traefik --id gitea-rbm2
+hotify-cli setup-dns --id remote-app
+hotify-cli setup-traefik --id remote-app
 ```
+
+### Remote Service Proxying Caveats
+
+**Service Binding for Remote Access**
+- **Issue**: Services bound to 127.0.0.1 not accessible via Tailscale/VPN
+- **Solution**: Bind services to 0.0.0.0 for remote access
+- **Verification**: Check listening address with `ss -tlnp | grep <port>`
+- **Security**: Use authentication (passwords, basic auth) when binding to 0.0.0.0
+
+**ACME Certificate Generation Timing**
+- **Issue**: Domain returns SSL errors immediately after Traefik setup
+- **Cause**: Let's Encrypt certificate generation takes 10-30 seconds
+- **Solution**: Wait before testing domain access
+- **Verification**: Check certificate in `/etc/traefik/acme.json`
+
+**Local Flag for DNS/Traefik Setup**
+- **Issue**: Remote daemon authentication failures (401 errors) prevent DNS/Traefik setup
+- **Solution**: Use `--local` flag to execute commands directly on local machine
+- **When to use**: Remote daemon has auth issues, faster local execution
+- **Example**: `hotify-cli setup-dns --id <app> --ip <ip> --local`
+
+**Domain Naming Patterns**
+- **Pattern**: Include machine name in subdomain for clarity
+- **Format**: `<service>.<machine>.<domain>`
+- **Examples**: `hermes.rbm21.intrane.fr`, `cmdcenter.dk1.intrane.fr`
+- **Benefits**: Clear service location identification, prevents domain conflicts
 
 ## Architecture
 
@@ -196,7 +222,13 @@ hotify-cli api-keys --action add --name fullaccess --permissions "*"
 
 ## Version Information
 
-Current version: v2.8.2
+Current version: v2.9.0
+
+### v2.9.0 Features
+- **Backend URL support**: Added `--backend-url` parameter for proxying remote services
+- **Local DNS/Traefik setup**: Enhanced `--local` flag support for DNS and Traefik commands
+- **Remote service proxying**: Enable exposing services on remote machines via local Traefik
+- **Use case**: Proxy services running on Tailscale/VPN-connected machines
 
 ### v2.8.2 Features
 - **Bug fix**: Fixed APR1-MD5 hash generation for basic-auth

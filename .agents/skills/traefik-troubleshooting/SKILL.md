@@ -103,10 +103,58 @@ sudo systemctl restart traefik
 
 **Root Cause**: The DNS record already exists from a previous setup attempt.
 
-**Solution**: 
+**Solution**:
 1. Check if record exists in Cloudflare dashboard
 2. If it exists and points to correct IP, skip DNS setup
 3. If it exists but points to wrong IP, update it via Cloudflare dashboard or API
+
+### ACME Certificate Generation Timing
+
+**Symptom**: Domain returns SSL errors immediately after Traefik setup, even though configuration is correct.
+
+**Root Cause**: Let's Encrypt certificate generation takes 10-30 seconds to complete. The domain may return SSL errors during this period.
+
+**Solution**: Wait before testing domain access after Traefik setup.
+
+**Verification**: Check if certificate exists in acme.json:
+```bash
+cat /etc/traefik/acme.json | jq '.certificates[] | select(.domain.main == "<domain>")'
+```
+
+**Testing workflow**:
+```bash
+# Setup Traefik
+hotify-cli setup-traefik --id myapp --challenge-type http
+
+# Wait for certificate generation (10-30 seconds)
+sleep 20
+
+# Test domain access
+curl https://<domain>/health
+```
+
+### Service Binding for Remote Access
+
+**Symptom**: Traefik returns 502 Bad Gateway when proxying to remote service via Tailscale/VPN.
+
+**Root Cause**: Backend service is bound to 127.0.0.1 (localhost) instead of 0.0.0.0, making it inaccessible from remote networks.
+
+**Solution**: Bind backend service to 0.0.0.0 for remote access.
+
+**Example systemd configuration**:
+```ini
+[Service]
+Environment=SERVICE_HOST=0.0.0.0
+ExecStart=/usr/local/bin/service --host 0.0.0.0 --port 8787
+```
+
+**Verification**: Check listening address:
+```bash
+ss -tlnp | grep 8787
+# Should show: 0.0.0.0:8787 (not 127.0.0.1:8787)
+```
+
+**Security consideration**: When binding to 0.0.0.0, use authentication (passwords, basic auth) to restrict access.
 
 ## Troubleshooting Workflow
 
