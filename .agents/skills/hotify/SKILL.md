@@ -51,10 +51,10 @@ hotify-cli setup-traefik --id myapp --local
 ## Key Commands
 
 ### App Management
-- `hotify setup --id <id> --name <n> --domain <d> --port <p> --cmd <c> [--backend-url <url>]` — Create or update app
-- `hotify add --id <id> --name <n> --domain <d> --port <p> --cmd <c> [--backend-url <url>]` — Strict create (fails if exists)
-- `hotify remove --id <id>` — Delete app
-- `hotify list` — List all apps
+- `hotify setup --id <id> --name <n> --domain <d> --port <p> --cmd <c> [--backend-url <url>] [--target <t> | --local]` — Create or update app
+- `hotify add --id <id> --name <n> --domain <d> --port <p> --cmd <c> [--backend-url <url>] [--target <t> | --local]` — Strict create (fails if exists)
+- `hotify remove --id <id> [--target <t> | --local]` — Delete app
+- `hotify list [--target <t> | --local]` — List all apps
 
 ### Remote Process Management
 - `hotify start --id <id>` — Start app (uses configured target by default)
@@ -70,14 +70,14 @@ hotify-cli setup-traefik --id myapp --local
 - `hotify basic-auth --id <id> --action <add|remove|list>` — Manage Traefik HTTP basic auth
 
 ### Docker Compose Deployment
-- `hotify deploy-compose --id <id> --source <dir>` — Copy full project tree to remote
-- `hotify compose-sync --id <id> [--source <dir>]` — Sync compose file (+ .env) only
-- `hotify compose-copy-dir --id <id> --dir <subdir> --source <local-dir>` — Copy directory to remote
-- `hotify compose [--id <app>] <subcommand> [args...]` — Passthrough to docker compose
+- `hotify deploy-compose --id <id> --source <dir> [--target <t> | --local]` — Copy full project tree to remote
+- `hotify compose-sync --id <id> [--source <dir>] [--target <t> | --local]` — Sync compose file (+ .env) only
+- `hotify compose-copy-dir --id <id> --dir <subdir> --source <local-dir> [--target <t> | --local]` — Copy directory to remote
+- `hotify compose [--id <app>] [--target <t> | --local] <subcommand> [args...]` — Passthrough to docker compose (v2.10.0 adds remote support)
 
 ### Deployment
-- `hotify deploy --id <id> --source <path>` — Deploy binary/folder
-- `hotify prune --id <id>` — Remove DNS/Traefik for app
+- `hotify deploy --id <id> --source <path> [--target <t> | --local]` — Deploy binary/folder (v2.10.0 adds --local)
+- `hotify prune --id <id> [--target <t> | --local]` — Remove DNS/Traefik for app (v2.10.0 adds remote support)
 
 ### Authentication & Targets
 - `hotify auth --url <u> --token <t> --name <n>` — Authenticate with remote daemon
@@ -222,7 +222,21 @@ hotify-cli api-keys --action add --name fullaccess --permissions "*"
 
 ## Version Information
 
-Current version: v2.9.0
+Current version: v2.10.0
+
+### v2.10.0 Features (Complete Remote/Targets Roadmap)
+- **Deployment commands --local flag**: All deployment commands (`deploy`, `deploy-compose`, `compose-sync`, `compose-copy-dir`, `volume-init`, `setup-compose`) now accept `--local` to execute directly on current machine without remote target
+- **Remote app config management**: `setup`, `add`, `edit`, `remove`, `list` all support `--target` for remote execution via HTTP API
+  - New server endpoints: `POST /api/remote/apps/{id}/config-setup`, `GET|DELETE /api/remote/apps/{id}/config`
+  - Client methods: `SetupAppConfig`, `GetAppConfig`, `RemoveAppConfig`, `ListAppsRemote`
+- **Remote Docker management**: All `docker` subcommands (`list`, `start`, `stop`, `restart`, `status`, `logs`, `enable-traefik`, `disable-traefik`) support `--target` / `--local`
+  - New server_docker_remote.go with full container CRUD + Traefik Docker provider toggle
+  - Client methods: `DockerListRemote`, `DockerStartRemote`, `DockerStopRemote`, `DockerRestartRemote`, `DockerStatusRemote`, `DockerLogsRemote`, `DockerEnableTraefikRemote`, `DockerDisableTraefikRemote`
+- **Remote prune support**: `prune --target <name>` sends prune operation to remote daemon, `--local` forces local execution
+  - New server handler: `POST /api/remote/apps/{id}/prune`
+- **Remote compose passthrough**: `compose --target <name>` routes docker compose commands to remote daemon, `--local` forces local execution
+  - New server endpoint: `POST /api/remote/compose/exec` with subcommand allowlist and audit logging
+  - Client method: `ComposeExecRemote`
 
 ### v2.9.0 Features
 - **Backend URL support**: Added `--backend-url` parameter for proxying remote services
