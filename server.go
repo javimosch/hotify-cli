@@ -115,6 +115,12 @@ func startServer(port int) {
 	// App-specific remote endpoints (auth required)
 	registerAppRemoteRoutes(mux)
 
+	// Docker remote management endpoints (auth required)
+	registerDockerRemoteRoutes(mux)
+
+	// Compose passthrough endpoint (auth required)
+	registerComposePassthroughRoute(mux)
+
 	// Traefik system management endpoints (auth required)
 	registerTraefikSystemRoutes(mux)
 	mux.HandleFunc("/api/apps/edit", authMiddleware(handleEditAppAPI))

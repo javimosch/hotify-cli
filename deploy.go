@@ -22,12 +22,13 @@ const (
 	ExitConnectionTimeout       = 105
 )
 
-// handleDeploy handles file transfer: hotify-cli deploy --id <id> --source <path> [--target <name>] [--setup-dns] [--ip <ip>]
+// handleDeploy handles file transfer: hotify-cli deploy --id <id> --source <path> [--target <name>] [--local] [--setup-dns] [--ip <ip>]
 func handleDeploy() {
 	deployCmd := flag.NewFlagSet("deploy", flag.ExitOnError)
 	appID := deployCmd.String("id", "", "App ID (required)")
 	source := deployCmd.String("source", "", "Source file or directory path (required)")
 	target := deployCmd.String("target", "", "Target name (uses default if not specified)")
+	local := deployCmd.Bool("local", false, "Execute locally (ignore target)")
 	setupDNS := deployCmd.Bool("setup-dns", false, "Also create Cloudflare DNS A record after deploy")
 	ip := deployCmd.String("ip", "", "Server IP for DNS (auto-detected if omitted)")
 
@@ -61,20 +62,25 @@ func handleDeploy() {
 		os.Exit(ExitInvalidArgument)
 	}
 
-	targetObj, err := getActiveTarget(*target)
-	if err != nil {
-		printOutput(CommandResult{
-			Version: Version, Success: false,
-			Error: &CommandError{
-				Code: ExitTargetNotFound, Type: "target_error", Message: err.Error(),
-				Recoverable: false,
-				Suggestions: []string{
-					"hotify-cli targets --action list",
-					"hotify-cli targets --action use --name <name>",
+	var targetObj *Remote
+	if !*local {
+		var err error
+		targetObj, err = getActiveTarget(*target)
+		if err != nil {
+			printOutput(CommandResult{
+				Version: Version, Success: false,
+				Error: &CommandError{
+					Code: ExitTargetNotFound, Type: "target_error", Message: err.Error(),
+					Recoverable: false,
+					Suggestions: []string{
+						"hotify-cli targets --action list",
+						"hotify-cli targets --action use --name <name>",
+						"hotify-cli deploy --id <id> --source <path> --local",
+					},
 				},
-			},
-		}, format)
-		os.Exit(ExitTargetNotFound)
+			}, format)
+			os.Exit(ExitTargetNotFound)
+		}
 	}
 
 	warnings := []string{}
@@ -108,15 +114,19 @@ func handleDeploy() {
 		}
 	}
 
-	handleDeployAction(*appID, *source, targetObj, format, warnings)
+	handleDeployAction(*appID, *source, targetObj, *local, format, warnings)
 }
 
-func handleDeployAction(appID, source string, target *Remote, format OutputFormat, warnings []string) {
+func handleDeployAction(appID, source string, target *Remote, isLocal bool, format OutputFormat, warnings []string) {
 	if warnings == nil {
 		warnings = []string{}
 	}
+	targetName := "local"
+	if target != nil {
+		targetName = target.Name
+	}
 	if format == OutputFormatText {
-		fmt.Printf("Deploying app %s to target %s\n", appID, target.Name)
+		fmt.Printf("Deploying app %s to %s\n", appID, targetName)
 	}
 
 	// Validate source
@@ -154,56 +164,67 @@ func handleDeployAction(appID, source string, target *Remote, format OutputForma
 		os.Exit(ExitInvalidArgument)
 	}
 
-	// Create deployment client
-	client, err := NewDeploymentClient(target)
-	if err != nil {
-		result := CommandResult{
-			Version: Version,
-			Success: false,
-			Error: &CommandError{
-				Code:        ExitGenericFailure,
-				Type:        "client_error",
-				Message:     fmt.Sprintf("Error creating deployment client: %v", err),
-				Recoverable: false,
-				Suggestions: []string{"Check target configuration", "Verify authentication token"},
-			},
-		}
-		printOutput(result, format)
-		os.Exit(ExitGenericFailure)
-	}
-
-	// Determine deployment type based on source
+	// Determine deployment type and paths
 	var deployErr error
 	var targetPath string
 	var deploymentType string
-
-	if sourceInfo.IsDir() {
-		// Folder deployment
-		targetPath = fmt.Sprintf("/home/dk1/apps/%s", appID)
-		deploymentType = "folder"
-
-		if format == OutputFormatText {
-			fmt.Printf("📦 Deploying folder: %s -> %s\n", source, targetPath)
-		}
-		deployErr = client.DeployFolder(appID, source, targetPath)
-	} else {
-		// Binary deployment
-		targetPath = fmt.Sprintf("/home/dk1/apps/%s/%s", appID, filepath.Base(source))
-		deploymentType = "binary"
-
-		if format == OutputFormatText {
-			fmt.Printf("🔧 Deploying binary: %s -> %s\n", source, targetPath)
-		}
-		deployErr = client.DeployBinary(appID, source, targetPath)
-	}
-
-	// Cleanup temporary files
 	defer CleanupTempFiles()
 
+	if isLocal {
+		// Local deployment: copy directly on this machine
+		localAppsDir := fmt.Sprintf("/tmp/hotify-apps/%s", appID)
+		if sourceInfo.IsDir() {
+			targetPath = localAppsDir
+			deploymentType = "folder"
+			if format == OutputFormatText {
+				fmt.Printf("Deploying folder locally: %s -> %s\n", source, targetPath)
+			}
+			deployErr = localCopyDir(source, targetPath)
+		} else {
+			targetPath = fmt.Sprintf("%s/%s", localAppsDir, filepath.Base(source))
+			deploymentType = "binary"
+			if format == OutputFormatText {
+				fmt.Printf("Deploying binary locally: %s -> %s\n", source, targetPath)
+			}
+			deployErr = LocalDeploy(source, targetPath)
+		}
+	} else {
+		// Remote deployment via HTTP API
+		client, err := NewDeploymentClient(target)
+		if err != nil {
+			printOutput(CommandResult{
+				Version: Version, Success: false,
+				Error: &CommandError{
+					Code:        ExitGenericFailure,
+					Type:        "client_error",
+					Message:     fmt.Sprintf("Error creating deployment client: %v", err),
+					Recoverable: false,
+					Suggestions: []string{"Check target configuration", "Verify authentication token"},
+				},
+			}, format)
+			os.Exit(ExitGenericFailure)
+		}
+
+		if sourceInfo.IsDir() {
+			targetPath = fmt.Sprintf("/tmp/hotify-apps/%s", appID)
+			deploymentType = "folder"
+			if format == OutputFormatText {
+				fmt.Printf("Deploying folder: %s -> %s:%s\n", source, targetName, targetPath)
+			}
+			deployErr = client.DeployFolder(appID, source, targetPath)
+		} else {
+			targetPath = fmt.Sprintf("/tmp/hotify-apps/%s/%s", appID, filepath.Base(source))
+			deploymentType = "binary"
+			if format == OutputFormatText {
+				fmt.Printf("Deploying binary: %s -> %s:%s\n", source, targetName, targetPath)
+			}
+			deployErr = client.DeployBinary(appID, source, targetPath)
+		}
+	}
+
 	if deployErr != nil {
-		result := CommandResult{
-			Version: Version,
-			Success: false,
+		printOutput(CommandResult{
+			Version: Version, Success: false,
 			Error: &CommandError{
 				Code:        ExitGenericFailure,
 				Type:        "deployment_error",
@@ -211,8 +232,7 @@ func handleDeployAction(appID, source string, target *Remote, format OutputForma
 				Recoverable: true,
 				Suggestions: []string{"Check network connectivity to target", "Verify target server is running", "Check target disk space"},
 			},
-		}
-		printOutput(result, format)
+		}, format)
 		os.Exit(ExitGenericFailure)
 	}
 
@@ -221,10 +241,11 @@ func handleDeployAction(appID, source string, target *Remote, format OutputForma
 		Success: true,
 		Data: map[string]interface{}{
 			"app_id":          appID,
-			"target":          target.Name,
+			"target":          targetName,
 			"deployment_type": deploymentType,
 			"source":          source,
 			"target_path":     targetPath,
+			"local":           isLocal,
 		},
 		Metadata: map[string]interface{}{
 			"timestamp": time.Now().Unix(),

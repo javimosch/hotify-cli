@@ -22,13 +22,8 @@ func registerAppRemoteRoutes(mux *http.ServeMux) {
 
 // handleAppRemoteAPI handles app-specific remote operations.
 // URL pattern: /api/remote/apps/{id}/{action}
-// Supported actions: basic-auth, setup-traefik, setup-dns
+// Supported actions: basic-auth, setup-traefik, setup-dns, config-setup, config
 func handleAppRemoteAPI(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
 	// Extract app ID and action from URL path
 	// URL format: /api/remote/apps/{id}/{action}
 	pathParts := strings.Split(r.URL.Path, "/")
@@ -41,11 +36,33 @@ func handleAppRemoteAPI(w http.ResponseWriter, r *http.Request) {
 
 	switch action {
 	case "basic-auth":
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 		handleBasicAuthRemoteAPI(w, r, appID)
 	case "setup-traefik":
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 		handleSetupTraefikRemoteAPI(w, r, appID)
 	case "setup-dns":
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 		handleSetupDNSRemoteAPI(w, r, appID)
+	case "config-setup":
+		handleAppConfigRemoteAPI(w, r, appID, "config-setup")
+	case "config":
+		handleAppConfigRemoteAPI(w, r, appID, "config")
+	case "prune":
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		handleRemotePruneAppAPI(w, r, appID)
 	default:
 		http.Error(w, "Unknown action", http.StatusNotFound)
 	}

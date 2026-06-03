@@ -11,11 +11,12 @@ import (
 // It is a passthrough to "docker compose" with optional app-context resolution.
 //
 // Usage patterns:
-//   hotify-cli compose --id <app> <subcommand> [args...]
+//   hotify-cli compose [--id <app>] [--target <t>] <subcommand> [args...]
 //   hotify-cli compose <subcommand> [args...]   (no app context, raw passthrough)
 //
 // When --id is supplied, hotify-cli resolves compose_path and compose_file from
 // the app config and changes into compose_path before running docker compose.
+// When --target is supplied, the command is sent to the remote daemon.
 // Any remaining args (including the subcommand) are forwarded verbatim.
 func handleComposeCLI() {
 	if len(os.Args) < 3 {
@@ -23,14 +24,27 @@ func handleComposeCLI() {
 		os.Exit(1)
 	}
 
-	// Check if first arg is --id or -id
+	// Parse --id and --target from early args, leaving remaining as passthrough
 	var appID string
+	var targetName string
 	passthroughArgs := os.Args[2:]
+	filtered := []string{}
 
-	if len(passthroughArgs) >= 2 && (passthroughArgs[0] == "--id" || passthroughArgs[0] == "-id") {
-		appID = passthroughArgs[1]
-		passthroughArgs = passthroughArgs[2:]
+	for i := 0; i < len(passthroughArgs); i++ {
+		arg := passthroughArgs[i]
+		if (arg == "--id" || arg == "-id") && i+1 < len(passthroughArgs) {
+			appID = passthroughArgs[i+1]
+			i++
+		} else if (arg == "--target") && i+1 < len(passthroughArgs) {
+			targetName = passthroughArgs[i+1]
+			i++
+		} else if arg == "--local" {
+			targetName = ""
+		} else {
+			filtered = append(filtered, arg)
+		}
 	}
+	passthroughArgs = filtered
 
 	if len(passthroughArgs) == 0 {
 		printComposeHelp()
@@ -40,6 +54,12 @@ func handleComposeCLI() {
 	// help shortcut
 	if passthroughArgs[0] == "help" || passthroughArgs[0] == "--help" || passthroughArgs[0] == "-h" {
 		printComposeHelp()
+		return
+	}
+
+	// Remote mode: forward to daemon
+	if targetName != "" {
+		handleComposeRemote(appID, targetName, passthroughArgs)
 		return
 	}
 
@@ -99,6 +119,49 @@ func handleComposeCLI() {
 		}
 		fmt.Fprintf(os.Stderr, "hotify-cli compose: %v\n", err)
 		os.Exit(ExitGenericFailure)
+	}
+}
+
+// handleComposeRemote sends a compose exec request to a remote daemon.
+func handleComposeRemote(appID, targetName string, passthroughArgs []string) {
+	format := getOutputFormat()
+	target, err := getActiveTarget(targetName)
+	if err != nil {
+		exitTargetNotFound(format, err)
+	}
+	client, err := NewDeploymentClient(target)
+	if err != nil {
+		exitClientError(format, err)
+	}
+
+	if len(passthroughArgs) == 0 {
+		printComposeHelp()
+		os.Exit(1)
+	}
+
+	subcommand := passthroughArgs[0]
+	args := []string{}
+	if len(passthroughArgs) > 1 {
+		args = passthroughArgs[1:]
+	}
+
+	result, err := client.ComposeExecRemote(appID, subcommand, args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "hotify-cli compose: remote error: %v\n", err)
+		os.Exit(ExitGenericFailure)
+	}
+
+	// Print output directly (like a passthrough would)
+	if output, ok := result["output"].(string); ok && output != "" {
+		fmt.Print(output)
+	}
+
+	exitCode := 0
+	if ec, ok := result["exit_code"].(float64); ok {
+		exitCode = int(ec)
+	}
+	if exitCode != 0 {
+		os.Exit(exitCode)
 	}
 }
 

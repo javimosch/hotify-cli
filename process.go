@@ -1,8 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"time"
 )
@@ -262,13 +264,21 @@ func outputAppAction(appID, targetName, action, status string, format OutputForm
 	}, format)
 }
 
-// handlePrune handles: hotify-cli prune [--id <id> | --all]
+// handlePrune handles: hotify-cli prune [--id <id> | --all] [--target <name>] [--local]
 func handlePrune() {
 	format := getOutputFormat()
 	pruneCmd := flag.NewFlagSet("prune", flag.ExitOnError)
 	id := pruneCmd.String("id", "", "App ID to prune (removes DNS + Traefik config for this app)")
 	all := pruneCmd.Bool("all", false, "Prune all removed apps (clean up DNS + Traefik for apps no longer in config)")
+	targetName := pruneCmd.String("target", "", "Target name for remote execution")
+	local := pruneCmd.Bool("local", false, "Execute locally (ignore target)")
 	pruneCmd.Parse(filterHumanFlag(os.Args[2:]))
+
+	// Remote mode
+	if !*local && *targetName != "" {
+		handlePruneRemote(*id, *all, *targetName, format)
+		return
+	}
 
 	if *id == "" && !*all {
 		printOutput(CommandResult{
@@ -327,6 +337,82 @@ func handlePrune() {
 		Metadata: map[string]interface{}{
 			"warnings": warnings,
 		},
+	}, format)
+}
+
+// handleRemotePruneAppAPI is the server-side handler for POST /api/remote/apps/{id}/prune.
+// Body: { "all": bool }
+func handleRemotePruneAppAPI(w http.ResponseWriter, r *http.Request, appID string) {
+	var payload struct {
+		All bool `json:"all"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&payload)
+
+	config, err := loadConfig()
+	if err != nil {
+		http.Error(w, "Config load failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	results := []map[string]interface{}{}
+	warnings := []string{}
+
+	if payload.All || appID == "" {
+		warnings = append(warnings,
+			"DNS records in Cloudflare are NOT automatically removed",
+			"Traefik dynamic.yml has been regenerated from current app list",
+		)
+		if err := updateDynamicConfig(config); err != nil {
+			warnings = append(warnings, "Traefik config update failed: "+err.Error())
+		} else if err := restartTraefik(); err != nil {
+			warnings = append(warnings, "Traefik restart failed: "+err.Error())
+		}
+		results = append(results, map[string]interface{}{"action": "rebuild_traefik", "status": "done"})
+	} else {
+		r, w := pruneApp(appID, config)
+		results = append(results, r)
+		warnings = append(warnings, w...)
+	}
+
+	auditLogger.LogEvent(AuditEvent{
+		EventType: AuditEventDeploy,
+		TokenName: r.Header.Get("X-API-Key-Name"),
+		Details:   fmt.Sprintf("Prune executed for app: %s (all=%v)", appID, payload.All),
+		Success:   true,
+	})
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":  true,
+		"pruned":   results,
+		"warnings": warnings,
+	})
+}
+
+// handlePruneRemote executes prune on a remote daemon.
+func handlePruneRemote(appID string, all bool, targetName string, format OutputFormat) {
+	target, err := getActiveTarget(targetName)
+	if err != nil {
+		exitTargetNotFound(format, err)
+	}
+	client, err := NewDeploymentClient(target)
+	if err != nil {
+		exitClientError(format, err)
+	}
+	result, err := client.HTTPClient.PostWithData(
+		fmt.Sprintf("/api/remote/apps/%s/prune", appID),
+		map[string]interface{}{"all": all},
+	)
+	if err != nil {
+		printOutput(CommandResult{
+			Version: Version, Success: false,
+			Error: &CommandError{Code: ExitGenericFailure, Type: "remote_error", Message: err.Error(), Recoverable: true},
+		}, format)
+		os.Exit(ExitGenericFailure)
+	}
+	printOutput(CommandResult{
+		Version: Version, Success: true,
+		Data:     result,
+		Metadata: map[string]interface{}{"target": target.Name, "timestamp": time.Now().Unix()},
 	}, format)
 }
 

@@ -18,6 +18,7 @@ func handleComposeCopyDirCLI() {
 	dirName := cmd.String("dir", "", "Subdirectory name on remote, relative to compose_path (required)")
 	source := cmd.String("source", "", "Local directory to copy (required)")
 	targetName := cmd.String("target", "", "Target name (uses default if not specified)")
+	local := cmd.Bool("local", false, "Execute locally (ignore target)")
 	cmd.Parse(filterHumanFlag(os.Args[2:]))
 	format := getOutputFormat()
 
@@ -68,31 +69,39 @@ func handleComposeCopyDirCLI() {
 		os.Exit(ExitInvalidArgument)
 	}
 
-	target, err := getActiveTarget(*targetName)
-	if err != nil {
-		exitTargetNotFound(format, err)
-	}
-	client, err := NewDeploymentClient(target)
-	if err != nil {
-		exitClientError(format, err)
-	}
-
 	remoteDest := filepath.Join(app.ComposePath, *dirName)
-	if format == OutputFormatText {
-		fmt.Printf("Copying %s → %s:%s\n", *source, target.Name, remoteDest)
+	displayTarget := "local"
+	var copyErr error
+
+	if *local {
+		if format == OutputFormatText {
+			fmt.Printf("Copying %s → %s (local)\n", *source, remoteDest)
+		}
+		copyErr = localCopyDir(*source, remoteDest)
+	} else {
+		target, err := getActiveTarget(*targetName)
+		if err != nil {
+			exitTargetNotFound(format, err)
+		}
+		displayTarget = target.Name
+		client, err := NewDeploymentClient(target)
+		if err != nil {
+			exitClientError(format, err)
+		}
+		if format == OutputFormatText {
+			fmt.Printf("Copying %s → %s:%s\n", *source, target.Name, remoteDest)
+		}
+		copyErr = client.DeployFolder(*appID, *source, remoteDest)
 	}
 
-	if err := client.DeployFolder(*appID, *source, remoteDest); err != nil {
+	if copyErr != nil {
 		printOutput(CommandResult{
 			Version: Version, Success: false,
 			Error: &CommandError{
 				Code: ExitGenericFailure, Type: "copy_error",
-				Message:     fmt.Sprintf("Failed to copy directory: %v", err),
+				Message:     fmt.Sprintf("Failed to copy directory: %v", copyErr),
 				Recoverable: true,
-				Suggestions: []string{
-					"Check target connectivity",
-					"Verify hotify daemon is running on remote",
-				},
+				Suggestions: []string{"Check target connectivity", "Verify hotify daemon is running on remote"},
 			},
 		}, format)
 		os.Exit(ExitGenericFailure)
@@ -102,10 +111,11 @@ func handleComposeCopyDirCLI() {
 		Version: Version, Success: true,
 		Data: map[string]interface{}{
 			"app_id":      *appID,
-			"target":      target.Name,
+			"target":      displayTarget,
 			"dir":         *dirName,
 			"source":      *source,
 			"remote_path": remoteDest,
+			"local":       *local,
 		},
 		Metadata: map[string]interface{}{"timestamp": time.Now().Unix()},
 	}, format)
@@ -120,6 +130,7 @@ func handleVolumeInitCLI() {
 	volumeName := cmd.String("volume", "", "Docker volume name (e.g. cir-webui → volume <id>_cir-webui) (required)")
 	source := cmd.String("source", "", "Local directory whose contents populate the volume (required)")
 	targetName := cmd.String("target", "", "Target name (uses default if not specified)")
+	local := cmd.Bool("local", false, "Execute locally (ignore target)")
 	cmd.Parse(filterHumanFlag(os.Args[2:]))
 	format := getOutputFormat()
 
@@ -150,26 +161,40 @@ func handleVolumeInitCLI() {
 		os.Exit(ExitInvalidArgument)
 	}
 
-	target, err := getActiveTarget(*targetName)
-	if err != nil {
-		exitTargetNotFound(format, err)
-	}
-	client, err := NewDeploymentClient(target)
-	if err != nil {
-		exitClientError(format, err)
+	displayTarget := "local"
+	var initErr error
+
+	if *local {
+		// Local volume init: copy to Docker volume path directly
+		localVolumePath := fmt.Sprintf("/var/lib/docker/volumes/%s_%s/_data", *appID, *volumeName)
+		if format == OutputFormatText {
+			fmt.Printf("Initializing volume %s_%s locally from %s\n", *appID, *volumeName, *source)
+			fmt.Println("NOTE: Requires write access to /var/lib/docker/volumes/")
+		}
+		initErr = localCopyDir(*source, localVolumePath)
+	} else {
+		target, err := getActiveTarget(*targetName)
+		if err != nil {
+			exitTargetNotFound(format, err)
+		}
+		displayTarget = target.Name
+		client, err := NewDeploymentClient(target)
+		if err != nil {
+			exitClientError(format, err)
+		}
+		if format == OutputFormatText {
+			fmt.Printf("Initializing volume %s_%s on %s from %s\n", *appID, *volumeName, target.Name, *source)
+			fmt.Println("NOTE: Remote daemon needs write access to /var/lib/docker/volumes/")
+		}
+		initErr = client.VolumeInit(*appID, *volumeName, *source)
 	}
 
-	if format == OutputFormatText {
-		fmt.Printf("Initializing volume %s_%s on %s from %s\n", *appID, *volumeName, target.Name, *source)
-		fmt.Println("NOTE: Remote daemon needs write access to /var/lib/docker/volumes/")
-	}
-
-	if err := client.VolumeInit(*appID, *volumeName, *source); err != nil {
+	if initErr != nil {
 		printOutput(CommandResult{
 			Version: Version, Success: false,
 			Error: &CommandError{
 				Code: ExitGenericFailure, Type: "volume_init_error",
-				Message:     fmt.Sprintf("Volume init failed: %v", err),
+				Message:     fmt.Sprintf("Volume init failed: %v", initErr),
 				Recoverable: true,
 				Suggestions: []string{
 					"Ensure hotify daemon has write access to /var/lib/docker/volumes/",
@@ -183,13 +208,14 @@ func handleVolumeInitCLI() {
 	printOutput(CommandResult{
 		Version: Version, Success: true,
 		Data: map[string]interface{}{
-			"app_id":  *appID,
-			"target":  target.Name,
-			"volume":  fmt.Sprintf("%s_%s", *appID, *volumeName),
-			"source":  *source,
+			"app_id": *appID,
+			"target": displayTarget,
+			"volume": fmt.Sprintf("%s_%s", *appID, *volumeName),
+			"source": *source,
+			"local":  *local,
 		},
 		Metadata: map[string]interface{}{
-			"warning":   "Volume init requires write access to /var/lib/docker/volumes/ on the remote",
+			"warning":   "Volume init requires write access to /var/lib/docker/volumes/",
 			"timestamp": time.Now().Unix(),
 		},
 	}, format)
@@ -206,11 +232,12 @@ func handleSetupComposeCLI() {
 	startCmd := cmd.String("cmd", "", "Command to start app (required for new apps)")
 	source := cmd.String("source", "", "Local project directory to deploy (required)")
 	composeFile := cmd.String("compose-file", "", "Compose file name (e.g. docker-compose.yml)")
-	remotePath := cmd.String("remote-path", "", "Remote destination path (default: /home/dk1/<id>)")
+	remotePath := cmd.String("remote-path", "", "Remote destination path (default: /tmp/hotify-apps/<id>)")
 	setupDNS := cmd.Bool("setup-dns", false, "Also create Cloudflare DNS A record")
 	ip := cmd.String("ip", "", "Server IP for DNS (auto-detected if omitted)")
 	startAfter := cmd.Bool("start", false, "Start the service after deploying")
 	targetName := cmd.String("target", "", "Target name (uses default if not specified)")
+	local := cmd.Bool("local", false, "Execute locally (ignore target)")
 	cmd.Parse(filterHumanFlag(os.Args[2:]))
 	format := getOutputFormat()
 
@@ -237,7 +264,7 @@ func handleSetupComposeCLI() {
 	// Resolve paths
 	destPath := *remotePath
 	if destPath == "" {
-		destPath = fmt.Sprintf("/home/dk1/%s", *appID)
+		destPath = fmt.Sprintf("/tmp/hotify-apps/%s", *appID)
 	}
 	cfName := *composeFile
 	if cfName == "" {
@@ -326,15 +353,6 @@ func handleSetupComposeCLI() {
 	}
 
 	// Deploy project files
-	target, err := getActiveTarget(*targetName)
-	if err != nil {
-		exitTargetNotFound(format, err)
-	}
-	client, err := NewDeploymentClient(target)
-	if err != nil {
-		exitClientError(format, err)
-	}
-
 	if _, statErr := os.Stat(*source); statErr != nil {
 		printOutput(CommandResult{
 			Version: Version, Success: false,
@@ -347,17 +365,35 @@ func handleSetupComposeCLI() {
 		os.Exit(ExitInvalidArgument)
 	}
 
-	if format == OutputFormatText {
-		fmt.Printf("Deploying project %s → %s:%s\n", *source, target.Name, destPath)
-	}
+	displayTarget := "local"
 
-	if err := client.DeployFolder(*appID, *source, destPath); err != nil {
-		warnings = append(warnings, fmt.Sprintf("File deploy failed: %v", err))
-	}
-
-	if *startAfter {
-		if err := client.StartApp(*appID); err != nil {
-			warnings = append(warnings, fmt.Sprintf("Start failed: %v", err))
+	if *local {
+		if format == OutputFormatText {
+			fmt.Printf("Deploying project %s → %s (local)\n", *source, destPath)
+		}
+		if err := localCopyDir(*source, destPath); err != nil {
+			warnings = append(warnings, fmt.Sprintf("File deploy failed: %v", err))
+		}
+	} else {
+		target, err := getActiveTarget(*targetName)
+		if err != nil {
+			exitTargetNotFound(format, err)
+		}
+		displayTarget = target.Name
+		client, err := NewDeploymentClient(target)
+		if err != nil {
+			exitClientError(format, err)
+		}
+		if format == OutputFormatText {
+			fmt.Printf("Deploying project %s → %s:%s\n", *source, target.Name, destPath)
+		}
+		if err := client.DeployFolder(*appID, *source, destPath); err != nil {
+			warnings = append(warnings, fmt.Sprintf("File deploy failed: %v", err))
+		}
+		if *startAfter {
+			if err := client.StartApp(*appID); err != nil {
+				warnings = append(warnings, fmt.Sprintf("Start failed: %v", err))
+			}
 		}
 	}
 
@@ -371,7 +407,8 @@ func handleSetupComposeCLI() {
 			"port":         app.Port,
 			"compose_file": cfName,
 			"compose_path": destPath,
-			"target":       target.Name,
+			"target":       displayTarget,
+			"local":        *local,
 		},
 		Metadata: map[string]interface{}{"warnings": warnings, "timestamp": time.Now().Unix()},
 	}, format)

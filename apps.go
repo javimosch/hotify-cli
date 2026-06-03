@@ -4,21 +4,13 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"time"
 )
 
 // setupApp handles both "add" (new) and "setup" (upsert) logic.
 // isUpsert=false enforces unique ID (add), isUpsert=true allows update.
 func setupApp(isUpsert bool) {
 	format := getOutputFormat()
-	config, err := loadConfig()
-	if err != nil {
-		result := CommandResult{
-			Version: Version, Success: false,
-			Error: &CommandError{Code: ExitConfigError, Type: "config_error", Message: err.Error(), Recoverable: false},
-		}
-		printOutput(result, format)
-		os.Exit(ExitConfigError)
-	}
 
 	cmd := flag.NewFlagSet("setup", flag.ExitOnError)
 	id := cmd.String("id", "", "App ID (required)")
@@ -32,7 +24,25 @@ func setupApp(isUpsert bool) {
 	composeFile := cmd.String("compose-file", "", "Docker Compose file to use (e.g. compose.binary.yml)")
 	composePath := cmd.String("compose-path", "", "Path on remote where compose files live")
 	backendURL := cmd.String("backend-url", "", "Custom backend URL for external reverse proxy (e.g. http://100.114.4.57:8080)")
+	targetName := cmd.String("target", "", "Target name for remote execution")
+	local := cmd.Bool("local", false, "Execute locally (ignore target)")
 	cmd.Parse(filterHumanFlag(os.Args[2:]))
+
+	// Remote mode: forward to remote daemon
+	if !*local && *targetName != "" {
+		handleSetupAppRemote(*id, *name, *domain, *port, *command, *source, *composeFile, *composePath, *backendURL, *setupDNS, *ip, *targetName, format)
+		return
+	}
+
+	config, err := loadConfig()
+	if err != nil {
+		result := CommandResult{
+			Version: Version, Success: false,
+			Error: &CommandError{Code: ExitConfigError, Type: "config_error", Message: err.Error(), Recoverable: false},
+		}
+		printOutput(result, format)
+		os.Exit(ExitConfigError)
+	}
 
 	if *id == "" {
 		result := CommandResult{
@@ -187,6 +197,18 @@ func editApp() { setupApp(true) }
 
 func removeApp() {
 	format := getOutputFormat()
+	removeCmd := flag.NewFlagSet("remove", flag.ExitOnError)
+	id := removeCmd.String("id", "", "App ID (required)")
+	targetName := removeCmd.String("target", "", "Target name for remote execution")
+	local := removeCmd.Bool("local", false, "Execute locally (ignore target)")
+	removeCmd.Parse(filterHumanFlag(os.Args[2:]))
+
+	// Remote mode
+	if !*local && *targetName != "" {
+		handleRemoveAppRemote(*id, *targetName, format)
+		return
+	}
+
 	config, err := loadConfig()
 	if err != nil {
 		result := CommandResult{
@@ -196,10 +218,6 @@ func removeApp() {
 		printOutput(result, format)
 		os.Exit(ExitConfigError)
 	}
-
-	removeCmd := flag.NewFlagSet("remove", flag.ExitOnError)
-	id := removeCmd.String("id", "", "App ID (required)")
-	removeCmd.Parse(filterHumanFlag(os.Args[2:]))
 
 	if *id == "" {
 		result := CommandResult{
@@ -265,6 +283,17 @@ func removeApp() {
 
 func listApps() {
 	format := getOutputFormat()
+	listCmd := flag.NewFlagSet("list", flag.ExitOnError)
+	targetName := listCmd.String("target", "", "Target name for remote execution")
+	local := listCmd.Bool("local", false, "Execute locally (ignore target)")
+	listCmd.Parse(filterHumanFlag(os.Args[2:]))
+
+	// Remote mode
+	if !*local && *targetName != "" {
+		handleListAppsRemote(*targetName, format)
+		return
+	}
+
 	config, err := loadConfig()
 	if err != nil {
 		result := CommandResult{
@@ -325,4 +354,83 @@ func listApps() {
 		Data:    map[string]interface{}{"apps": apps, "count": len(apps)},
 	}
 	printOutput(result, format)
+}
+
+// ─── Remote helpers ───────────────────────────────────────────────────────────
+
+func handleSetupAppRemote(appID, name, domain string, port int, command, src, composeFile, composePath, backendURL string, setupDNS bool, ip, targetName string, format OutputFormat) {
+	target, err := getActiveTarget(targetName)
+	if err != nil {
+		exitTargetNotFound(format, err)
+	}
+	client, err := NewDeploymentClient(target)
+	if err != nil {
+		exitClientError(format, err)
+	}
+	payload := map[string]interface{}{
+		"name": name, "domain": domain, "port": port, "cmd": command,
+		"source": src, "compose_file": composeFile, "compose_path": composePath,
+		"backend_url": backendURL, "setup_dns": setupDNS, "ip": ip,
+	}
+	result, err := client.SetupAppConfig(appID, payload)
+	if err != nil {
+		printOutput(CommandResult{
+			Version: Version, Success: false,
+			Error: &CommandError{Code: ExitGenericFailure, Type: "remote_error", Message: err.Error(), Recoverable: true},
+		}, format)
+		os.Exit(ExitGenericFailure)
+	}
+	printOutput(CommandResult{
+		Version: Version, Success: true,
+		Data:     result,
+		Metadata: map[string]interface{}{"target": target.Name, "timestamp": time.Now().Unix()},
+	}, format)
+}
+
+func handleRemoveAppRemote(appID, targetName string, format OutputFormat) {
+	target, err := getActiveTarget(targetName)
+	if err != nil {
+		exitTargetNotFound(format, err)
+	}
+	client, err := NewDeploymentClient(target)
+	if err != nil {
+		exitClientError(format, err)
+	}
+	result, err := client.RemoveAppConfig(appID)
+	if err != nil {
+		printOutput(CommandResult{
+			Version: Version, Success: false,
+			Error: &CommandError{Code: ExitGenericFailure, Type: "remote_error", Message: err.Error(), Recoverable: true},
+		}, format)
+		os.Exit(ExitGenericFailure)
+	}
+	printOutput(CommandResult{
+		Version: Version, Success: true,
+		Data:     result,
+		Metadata: map[string]interface{}{"target": target.Name, "timestamp": time.Now().Unix()},
+	}, format)
+}
+
+func handleListAppsRemote(targetName string, format OutputFormat) {
+	target, err := getActiveTarget(targetName)
+	if err != nil {
+		exitTargetNotFound(format, err)
+	}
+	client, err := NewDeploymentClient(target)
+	if err != nil {
+		exitClientError(format, err)
+	}
+	result, err := client.ListAppsRemote()
+	if err != nil {
+		printOutput(CommandResult{
+			Version: Version, Success: false,
+			Error: &CommandError{Code: ExitGenericFailure, Type: "remote_error", Message: err.Error(), Recoverable: true},
+		}, format)
+		os.Exit(ExitGenericFailure)
+	}
+	printOutput(CommandResult{
+		Version: Version, Success: true,
+		Data:     result,
+		Metadata: map[string]interface{}{"target": target.Name, "timestamp": time.Now().Unix()},
+	}, format)
 }

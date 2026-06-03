@@ -97,6 +97,83 @@ func (d *DeploymentClient) GetAppLogs(appID string) (map[string]interface{}, err
 
 // ─── App-specific remote operations ─────────────────────────────────────────
 
+// ─── Compose passthrough remote ──────────────────────────────────────────────
+
+// ComposeExecRemote runs a docker compose subcommand on a remote daemon.
+// subcommand: "up", "down", "ps", "logs", etc.
+// args: additional flags/args forwarded to docker compose.
+func (d *DeploymentClient) ComposeExecRemote(appID, subcommand string, args []string) (map[string]interface{}, error) {
+	return d.HTTPClient.PostWithData("/api/remote/compose/exec", map[string]interface{}{
+		"app_id":     appID,
+		"subcommand": subcommand,
+		"args":       args,
+	})
+}
+
+// ─── Docker remote operations ────────────────────────────────────────────────
+
+// DockerListRemote lists containers on a remote daemon.
+func (d *DeploymentClient) DockerListRemote() (map[string]interface{}, error) {
+	return d.HTTPClient.Get("/api/remote/docker/containers")
+}
+
+// DockerStartRemote starts a container on a remote daemon.
+func (d *DeploymentClient) DockerStartRemote(containerID string) error {
+	return d.HTTPClient.Post(fmt.Sprintf("/api/remote/docker/containers/%s/start", containerID), nil)
+}
+
+// DockerStopRemote stops a container on a remote daemon.
+func (d *DeploymentClient) DockerStopRemote(containerID string) error {
+	return d.HTTPClient.Post(fmt.Sprintf("/api/remote/docker/containers/%s/stop", containerID), nil)
+}
+
+// DockerRestartRemote restarts a container on a remote daemon.
+func (d *DeploymentClient) DockerRestartRemote(containerID string) error {
+	return d.HTTPClient.Post(fmt.Sprintf("/api/remote/docker/containers/%s/restart", containerID), nil)
+}
+
+// DockerStatusRemote gets status of a container on a remote daemon.
+func (d *DeploymentClient) DockerStatusRemote(containerID string) (map[string]interface{}, error) {
+	return d.HTTPClient.Get(fmt.Sprintf("/api/remote/docker/containers/%s/status", containerID))
+}
+
+// DockerLogsRemote gets logs from a container on a remote daemon.
+func (d *DeploymentClient) DockerLogsRemote(containerID string, tail int) (map[string]interface{}, error) {
+	return d.HTTPClient.Get(fmt.Sprintf("/api/remote/docker/containers/%s/logs?tail=%d", containerID, tail))
+}
+
+// DockerEnableTraefikRemote enables Traefik Docker provider on a remote daemon.
+func (d *DeploymentClient) DockerEnableTraefikRemote() error {
+	return d.HTTPClient.Post("/api/remote/docker/enable-traefik", nil)
+}
+
+// DockerDisableTraefikRemote disables Traefik Docker provider on a remote daemon.
+func (d *DeploymentClient) DockerDisableTraefikRemote() error {
+	return d.HTTPClient.Post("/api/remote/docker/disable-traefik", nil)
+}
+
+// ─── App config remote operations ────────────────────────────────────────────
+
+// SetupAppConfig creates or updates an app config on a remote daemon.
+func (d *DeploymentClient) SetupAppConfig(appID string, payload map[string]interface{}) (map[string]interface{}, error) {
+	return d.HTTPClient.PostWithData(fmt.Sprintf("/api/remote/apps/%s/config-setup", appID), payload)
+}
+
+// GetAppConfig retrieves an app config from a remote daemon.
+func (d *DeploymentClient) GetAppConfig(appID string) (map[string]interface{}, error) {
+	return d.HTTPClient.Get(fmt.Sprintf("/api/remote/apps/%s/config", appID))
+}
+
+// RemoveAppConfig removes an app config from a remote daemon.
+func (d *DeploymentClient) RemoveAppConfig(appID string) (map[string]interface{}, error) {
+	return d.HTTPClient.DeleteWithData(fmt.Sprintf("/api/remote/apps/%s/config", appID))
+}
+
+// ListAppsRemote fetches all apps from a remote daemon.
+func (d *DeploymentClient) ListAppsRemote() (map[string]interface{}, error) {
+	return d.HTTPClient.Get("/api/apps")
+}
+
 // BasicAuthAdd adds a user with plaintext password to app's basic auth.
 func (d *DeploymentClient) BasicAuthAdd(appID, user, password string) error {
 	return d.HTTPClient.Post(fmt.Sprintf("/api/remote/apps/%s/basic-auth", appID), map[string]interface{}{
@@ -196,6 +273,28 @@ func (h *HTTPClient) Get(path string) (map[string]interface{}, error) {
 	return result, nil
 }
 
+// DeleteWithData sends a DELETE request and returns the JSON response.
+func (h *HTTPClient) DeleteWithData(path string) (map[string]interface{}, error) {
+	req, err := http.NewRequest("DELETE", h.BaseURL+path, nil)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+h.AuthToken)
+	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("error making request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("request failed with status %d", resp.StatusCode)
+	}
+	var result map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("error decoding response: %v", err)
+	}
+	return result, nil
+}
+
 func (h *HTTPClient) PostWithData(path string, payload map[string]interface{}) (map[string]interface{}, error) {
 	data, err := json.Marshal(payload)
 	if err != nil {
@@ -220,6 +319,45 @@ func (h *HTTPClient) PostWithData(path string, payload map[string]interface{}) (
 		return nil, fmt.Errorf("error decoding response: %v", err)
 	}
 	return result, nil
+}
+
+// localCopyDir copies a local directory tree to a destination path on this machine.
+func localCopyDir(src, dst string) error {
+	if err := os.MkdirAll(dst, 0755); err != nil {
+		return fmt.Errorf("error creating destination dir: %v", err)
+	}
+	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+		if info.IsDir() {
+			return os.MkdirAll(target, info.Mode())
+		}
+		return copyFile(path, target, info.Mode())
+	})
+}
+
+func copyFile(src, dst string, mode os.FileMode) error {
+	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+		return err
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	_, err = io.Copy(out, in)
+	return err
 }
 
 func LocalDeploy(sourcePath, remotePath string) error {
