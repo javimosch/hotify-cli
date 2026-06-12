@@ -56,6 +56,7 @@ func handleRemoteAppSetupAPI(w http.ResponseWriter, r *http.Request, appID strin
 		BackendURL  string `json:"backend_url"`
 		SetupDNS    bool   `json:"setup_dns"`
 		IP          string `json:"ip"`
+		FullDomain  bool   `json:"full_domain"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -84,7 +85,11 @@ func handleRemoteAppSetupAPI(w http.ResponseWriter, r *http.Request, appID strin
 			app.Name = payload.Name
 		}
 		if payload.Domain != "" {
-			app.Domain = fmt.Sprintf("%s.%s", payload.Domain, config.Domain)
+			if payload.FullDomain {
+				app.Domain = payload.Domain
+			} else {
+				app.Domain = fmt.Sprintf("%s.%s", payload.Domain, config.Domain)
+			}
 		}
 		if payload.Port != 0 {
 			app.Port = payload.Port
@@ -111,10 +116,16 @@ func handleRemoteAppSetupAPI(w http.ResponseWriter, r *http.Request, appID strin
 			http.Error(w, "New app requires name, domain, port, and cmd", http.StatusBadRequest)
 			return
 		}
+		var fullDomain string
+		if payload.FullDomain {
+			fullDomain = payload.Domain
+		} else {
+			fullDomain = fmt.Sprintf("%s.%s", payload.Domain, config.Domain)
+		}
 		config.Apps = append(config.Apps, App{
 			ID:          appID,
 			Name:        payload.Name,
-			Domain:      fmt.Sprintf("%s.%s", payload.Domain, config.Domain),
+			Domain:      fullDomain,
 			Port:        payload.Port,
 			Command:     payload.Command,
 			Source:      payload.Source,

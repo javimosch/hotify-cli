@@ -7,7 +7,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
+
+// configMu serialises all config load+save pairs so concurrent HTTP handlers
+// cannot interleave their read-modify-write cycles and silently drop fields
+// like BackendURL.
+var configMu sync.Mutex
 
 const (
 	configDir  = ".hotify"
@@ -167,6 +173,13 @@ func getConfigPath() (string, error) {
 }
 
 func loadConfig() (*Config, error) {
+	configMu.Lock()
+	defer configMu.Unlock()
+	return loadConfigLocked()
+}
+
+// loadConfigLocked is the internal implementation — call only while holding configMu.
+func loadConfigLocked() (*Config, error) {
 	configPath, err := getConfigPath()
 	if err != nil {
 		return nil, err
@@ -203,6 +216,15 @@ func loadConfig() (*Config, error) {
 }
 
 func saveConfig(config *Config) error {
+	configMu.Lock()
+	defer configMu.Unlock()
+	return saveConfigLocked(config)
+}
+
+// saveConfigLocked is the internal implementation — call only while holding configMu.
+// It writes to a temp file then renames atomically so a crash mid-write can
+// never corrupt the live config.json.
+func saveConfigLocked(config *Config) error {
 	configPath, err := getConfigPath()
 	if err != nil {
 		return err
@@ -213,11 +235,34 @@ func saveConfig(config *Config) error {
 		return fmt.Errorf("error marshaling config: %v", err)
 	}
 
-	if err := os.WriteFile(configPath, data, 0644); err != nil {
-		return fmt.Errorf("error writing config file: %v", err)
+	// Write to a sibling temp file, then rename — atomic on Linux/macOS.
+	tmpPath := configPath + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
+		return fmt.Errorf("error writing config tmp file: %v", err)
+	}
+	if err := os.Rename(tmpPath, configPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("error committing config file: %v", err)
 	}
 
 	return nil
+}
+
+// withConfig loads the config, runs fn (which may mutate it), then saves it —
+// all under configMu. This is the preferred way for handlers to do a
+// read-modify-write in a single critical section.
+func withConfig(fn func(*Config) error) error {
+	configMu.Lock()
+	defer configMu.Unlock()
+
+	config, err := loadConfigLocked()
+	if err != nil {
+		return err
+	}
+	if err := fn(config); err != nil {
+		return err
+	}
+	return saveConfigLocked(config)
 }
 
 func initConfig() {

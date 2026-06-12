@@ -5,12 +5,86 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
+
+// ─── Debounced dynamic.yml writer ────────────────────────────────────────────
+//
+// All calls to updateDynamicConfig enqueue the desired config snapshot instead
+// of writing immediately. A single background goroutine (startDynamicConfigWriter)
+// waits for 5 s of silence after the last enqueue, then flushes the most-recent
+// snapshot atomically (temp file → rename). This means:
+//
+//   - Rapid successive changes (e.g. concurrent API calls) are collapsed into one
+//     write, eliminating the race where Traefik's watch reloads a partial file.
+//   - The file is always consistent on disk; a crash during the write leaves the
+//     previous version intact.
+
+const dynamicWriteDebounce = 5 * time.Second
+
+var (
+	dynamicWriteCh   = make(chan *Config, 64) // buffered so callers never block
+	dynamicWriteOnce sync.Once               // ensures the goroutine starts once
+)
+
+// startDynamicConfigWriter launches the background flush goroutine. Safe to
+// call multiple times — only the first call has any effect.
+func startDynamicConfigWriter() {
+	dynamicWriteOnce.Do(func() {
+		go dynamicConfigWriterLoop()
+	})
+}
+
+func dynamicConfigWriterLoop() {
+	var pending *Config
+	var debounce <-chan time.Time // nil until first enqueue
+
+	for {
+		select {
+		case cfg := <-dynamicWriteCh:
+			if cfg != nil {
+				// New snapshot — keep the latest and restart the 5 s window.
+				pending = cfg
+				debounce = time.After(dynamicWriteDebounce)
+			}
+		case <-debounce:
+			// 5 s of silence — flush the latest snapshot.
+			debounce = nil
+			if pending == nil {
+				continue
+			}
+			if err := writeDynamicConfigAtomic(pending); err != nil {
+				log.Printf("[hotify] ERROR flushing dynamic.yml: %v", err)
+			} else {
+				log.Printf("[hotify] dynamic.yml flushed (%d app(s))", len(pending.Apps))
+			}
+			pending = nil
+		}
+	}
+}
+
+// writeDynamicConfigAtomic writes yaml to a temp file then renames atomically.
+func writeDynamicConfigAtomic(config *Config) error {
+	tmpPath := traefikDynamic + ".tmp"
+	content, err := buildDynamicYAML(config)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(tmpPath, []byte(content), 0644); err != nil {
+		return fmt.Errorf("write tmp: %w", err)
+	}
+	if err := os.Rename(tmpPath, traefikDynamic); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("rename: %w", err)
+	}
+	return nil
+}
 
 const (
 	traefikConfigDir = "/etc/traefik"
@@ -294,14 +368,13 @@ certificatesResolvers:
 	return nil
 }
 
-// updateDynamicConfig rewrites dynamic.yml from the current app list.
+// buildDynamicYAML renders the Traefik dynamic.yml content from the config.
 // TC1 fix: each router TLS section now includes an explicit `domains:` entry
 // so Traefik/ACME can resolve the domain during certificate provisioning.
-func updateDynamicConfig(config *Config) error {
-	// Validate each app before writing
+func buildDynamicYAML(config *Config) (string, error) {
 	for _, app := range config.Apps {
 		if err := validateApp(app); err != nil {
-			return fmt.Errorf("app validation failed: %v", err)
+			return "", fmt.Errorf("app validation failed: %v", err)
 		}
 	}
 
@@ -362,10 +435,35 @@ func updateDynamicConfig(config *Config) error {
 		}
 	}
 
-	if err := os.WriteFile(traefikDynamic, []byte(sb.String()), 0644); err != nil {
-		return fmt.Errorf("error writing dynamic.yml: %v", err)
+	return sb.String(), nil
+}
+
+// updateDynamicConfig enqueues a config snapshot for the debounced writer.
+// The background goroutine (startDynamicConfigWriter) will flush the latest
+// snapshot to dynamic.yml after 5 s of no further calls, atomically.
+// Validation is done eagerly here so callers get errors immediately.
+func updateDynamicConfig(config *Config) error {
+	// Validate first so the caller gets a synchronous error if something is wrong.
+	for _, app := range config.Apps {
+		if err := validateApp(app); err != nil {
+			return fmt.Errorf("app validation failed: %v", err)
+		}
 	}
 
+	// Deep-copy the Apps slice so the snapshot is immutable after enqueue.
+	snapshot := *config
+	appsCopy := make([]App, len(config.Apps))
+	copy(appsCopy, config.Apps)
+	snapshot.Apps = appsCopy
+
+	// Non-blocking send — channel is buffered (64); if full we fall back to a
+	// direct synchronous write so we never silently drop an update.
+	select {
+	case dynamicWriteCh <- &snapshot:
+	default:
+		log.Printf("[hotify] dynamic write queue full — flushing synchronously")
+		return writeDynamicConfigAtomic(&snapshot)
+	}
 	return nil
 }
 

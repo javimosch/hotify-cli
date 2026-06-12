@@ -72,6 +72,11 @@ func startServer(port int) {
 		log.Fatalf("Error creating audit logger: %v", err)
 	}
 
+	// Start the debounced dynamic.yml writer — groups rapid changes into a
+	// single atomic write after 5 s of silence, preventing Traefik from
+	// reloading a partially-written file.
+	startDynamicConfigWriter()
+
 	config, err := loadConfig()
 	if err != nil {
 		log.Fatalf("Error loading config: %v", err)
