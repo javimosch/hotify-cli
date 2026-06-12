@@ -40,6 +40,17 @@
       <div id="content-product" class="tab-content active">
 <div class="feature-card rounded-xl p-6">
   <div class="flex items-start gap-4">
+    <div class="w-12 h-12 rounded-lg bg-green-500/10 flex items-center justify-center flex-shrink-0">
+      <span class="text-2xl">🛡️</span>
+    </div>
+    <div>
+      <h3 class="text-xl font-semibold text-white mb-2">Atomic Config Management</h3>
+      <p class="text-slate-400 leading-relaxed">v2.10.1 introduces debounced writes, mutex-protected config, and crash-safe atomic file operations. This prevents race conditions that could silently drop configuration fields (like BackendURL) and eliminates Traefik watch reloads of partially-written files. All config changes are now grouped within a 5-second window and flushed atomically.</p>
+    </div>
+  </div>
+</div>
+<div class="feature-card rounded-xl p-6">
+  <div class="flex items-start gap-4">
     <div class="w-12 h-12 rounded-lg bg-blue-500/10 flex items-center justify-center flex-shrink-0">
       <span class="text-2xl">🌐</span>
     </div>
@@ -60,6 +71,7 @@
             <span>🚀</span> Features
           </h2>
           <ul class="space-y-2 text-slate-300">
+            <li><span class="text-slate-500 text-sm mr-3">[12/06]</span>fix: debounced atomic dynamic.yml writer + serialised config load/save</li>
             <li><span class="text-slate-500 text-sm mr-3">[03/06]</span>feat: complete remote/targets gap roadmap (P1-P5)</li>
           </ul>
         </section>
@@ -69,6 +81,9 @@
             <span>📚</span> Documentation
           </h2>
           <ul class="space-y-2 text-slate-300">
+            <li><span class="text-slate-500 text-sm mr-3">[12/06]</span>docs: add quick install via curl to README</li>
+            <li><span class="text-slate-500 text-sm mr-3">[12/06]</span>docs: update landing page with atomic config management feature</li>
+            <li><span class="text-slate-500 text-sm mr-3">[12/06]</span>docs: update changelog with v2.10.1 changes</li>
             <li><span class="text-slate-500 text-sm mr-3">[03/06]</span>docs: update hotify skill with v2.10.0 remote/targets features</li>
           </ul>
         </section>
@@ -78,6 +93,7 @@
             <span>⚙️</span> Miscellaneous Tasks
           </h2>
           <ul class="space-y-2 text-slate-300">
+            <li><span class="text-slate-500 text-sm mr-3">[12/06]</span>chore: bump version to v2.10.1</li>
             <li><span class="text-slate-500 text-sm mr-3">[03/06]</span>chore: bump version to v2.10.0</li>
           </ul>
         </section>

@@ -17,6 +17,14 @@ Hotify is an opinionated CLI+UI tool that simplifies deploying web apps behind T
 
 ## Installation
 
+### Quick Install (Linux)
+
+```bash
+curl -fsSL https://github.com/javimosch/hotify-cli/releases/latest/download/hotify-cli-linux-amd64 -o /tmp/hotify-cli
+sudo install -m 755 /tmp/hotify-cli /usr/local/bin/hotify-cli
+rm /tmp/hotify-cli
+```
+
 ### From Source
 
 ```bash
@@ -358,5 +366,5 @@ Contributions welcome! Please read the contributing guidelines first.
 ## Support
 
 For issues and questions:
-- GitHub Issues: [repository URL]
-- Documentation: [docs URL]
+- GitHub Issues: https://github.com/javimosch/hotify-cli/issues
+- Documentation: https://github.com/javimosch/hotify-cli
