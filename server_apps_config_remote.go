@@ -54,6 +54,7 @@ func handleRemoteAppSetupAPI(w http.ResponseWriter, r *http.Request, appID strin
 		ComposeFile string `json:"compose_file"`
 		ComposePath string `json:"compose_path"`
 		BackendURL  string `json:"backend_url"`
+		PathPrefix  string `json:"path_prefix"`
 		SetupDNS    bool   `json:"setup_dns"`
 		IP          string `json:"ip"`
 		FullDomain  bool   `json:"full_domain"`
@@ -109,6 +110,9 @@ func handleRemoteAppSetupAPI(w http.ResponseWriter, r *http.Request, appID strin
 		if payload.BackendURL != "" {
 			app.BackendURL = payload.BackendURL
 		}
+		if payload.PathPrefix != "" {
+			app.PathPrefix = payload.PathPrefix
+		}
 		config.Apps[existingIdx] = app
 	} else {
 		// New app requires name, domain, port, cmd
@@ -133,6 +137,7 @@ func handleRemoteAppSetupAPI(w http.ResponseWriter, r *http.Request, appID strin
 			ComposeFile: payload.ComposeFile,
 			ComposePath: payload.ComposePath,
 			BackendURL:  payload.BackendURL,
+			PathPrefix:  payload.PathPrefix,
 		})
 		existingIdx = len(config.Apps) - 1
 	}
@@ -260,6 +265,7 @@ func handleRemoteAppGetAPI(w http.ResponseWriter, r *http.Request, appID string)
 		"compose_file": app.ComposeFile,
 		"compose_path": app.ComposePath,
 		"backend_url":  app.BackendURL,
+		"path_prefix":  app.PathPrefix,
 	})
 }
 

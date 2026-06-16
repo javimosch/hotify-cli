@@ -368,6 +368,50 @@ certificatesResolvers:
 	return nil
 }
 
+// readExistingBackendURLs reads the current dynamic.yml (if it exists) and
+// extracts backend URLs keyed by app ID.  This is used as a fallback when
+// buildDynamicYAML runs for a single app update — it preserves previously
+// configured remote backend URLs that haven't been added to config.json yet.
+func readExistingBackendURLs() map[string]string {
+	urls := make(map[string]string)
+	data, err := os.ReadFile(traefikDynamic)
+	if err != nil {
+		return urls // file doesn't exist yet or can't be read — fine
+	}
+
+	lines := strings.Split(string(data), "\n")
+	var currentApp string
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasSuffix(trimmed, ":") && !strings.HasPrefix(trimmed, "-") {
+			// crude but reliable: services are top-level keys under "http:"
+			// that end with ":" and aren't list items.
+			if currentApp == "" {
+				// Skip top-level sections (routers, services, middlewares)
+				continue
+			}
+		}
+		// Detect the "services:" section
+		if trimmed == "services:" {
+			continue
+		}
+		// Detect an app id line right under services: (e.g. "    hermes-webui:")
+		if strings.HasPrefix(line, "    ") && strings.HasSuffix(trimmed, ":") && !strings.Contains(trimmed, " ") {
+			currentApp = strings.TrimSuffix(trimmed, ":")
+			continue
+		}
+		// Extract URL from "- url: \"http://...\""
+		if currentApp != "" && strings.Contains(trimmed, "url:") {
+			parts := strings.SplitN(trimmed, "\"", 3)
+			if len(parts) >= 2 {
+				urls[currentApp] = parts[1]
+			}
+			currentApp = "" // reset after consuming the url line
+		}
+	}
+	return urls
+}
+
 // buildDynamicYAML renders the Traefik dynamic.yml content from the config.
 // TC1 fix: each router TLS section now includes an explicit `domains:` entry
 // so Traefik/ACME can resolve the domain during certificate provisioning.
@@ -378,6 +422,10 @@ func buildDynamicYAML(config *Config) (string, error) {
 		}
 	}
 
+	// Snapshot existing backend URLs so we preserve remote backends even when
+	// config.json doesn't have backend_url set (hotify-cli bug workaround).
+	existingURLs := readExistingBackendURLs()
+
 	var sb strings.Builder
 	sb.WriteString("http:\n  routers:\n")
 
@@ -386,7 +434,14 @@ func buildDynamicYAML(config *Config) (string, error) {
 		sb.WriteString(fmt.Sprintf("      rule: \"Host(`%s`)\"\n", app.Domain))
 		sb.WriteString(fmt.Sprintf("      service: %s\n", app.ID))
 		sb.WriteString("      entryPoints:\n        - websecure\n")
-		if len(app.BasicAuth) > 0 {
+		// Add path prefix middleware if configured
+		if app.PathPrefix != "" {
+			if len(app.BasicAuth) > 0 {
+				sb.WriteString(fmt.Sprintf("      middlewares:\n        - %s-addprefix\n        - %s-basic-auth\n", app.ID, app.ID))
+			} else {
+				sb.WriteString(fmt.Sprintf("      middlewares:\n        - %s-addprefix\n", app.ID))
+			}
+		} else if len(app.BasicAuth) > 0 {
 			sb.WriteString(fmt.Sprintf("      middlewares:\n        - %s-basic-auth\n", app.ID))
 		}
 		sb.WriteString("      tls:\n")
@@ -402,18 +457,22 @@ func buildDynamicYAML(config *Config) (string, error) {
 		sb.WriteString(fmt.Sprintf("    %s:\n", app.ID))
 		sb.WriteString("      loadBalancer:\n")
 		sb.WriteString("        servers:\n")
-		// Use custom backend URL if provided, otherwise default to localhost
+		// Use custom backend URL if provided, otherwise check existing
+		// dynamic.yml (preserve previously configured remote backends),
+		// then fall back to localhost as a last resort.
 		if app.BackendURL != "" {
 			sb.WriteString(fmt.Sprintf("          - url: \"%s\"\n\n", app.BackendURL))
+		} else if existing, ok := existingURLs[app.ID]; ok {
+			sb.WriteString(fmt.Sprintf("          - url: \"%s\"\n\n", existing))
 		} else {
 			sb.WriteString(fmt.Sprintf("          - url: \"http://127.0.0.1:%d\"\n\n", app.Port))
 		}
 	}
 
-	// Emit middlewares section only for apps that have basicAuth entries
+	// Emit middlewares section for apps that have basicAuth entries or path_prefix
 	hasMiddleware := false
 	for _, app := range config.Apps {
-		if len(app.BasicAuth) > 0 {
+		if len(app.BasicAuth) > 0 || app.PathPrefix != "" {
 			hasMiddleware = true
 			break
 		}
@@ -421,17 +480,27 @@ func buildDynamicYAML(config *Config) (string, error) {
 	if hasMiddleware {
 		sb.WriteString("  middlewares:\n")
 		for _, app := range config.Apps {
-			if len(app.BasicAuth) == 0 {
+			// Skip if no middleware needed
+			if len(app.BasicAuth) == 0 && app.PathPrefix == "" {
 				continue
 			}
-			sb.WriteString(fmt.Sprintf("    %s-basic-auth:\n", app.ID))
-			sb.WriteString("      basicAuth:\n")
-			sb.WriteString("        users:\n")
-			for _, entry := range app.BasicAuth {
-				// YAML-escape the hash — $ chars need to be quoted
-				sb.WriteString(fmt.Sprintf("          - %q\n", entry))
+			// Add addPrefix middleware if path_prefix is set
+			if app.PathPrefix != "" {
+				sb.WriteString(fmt.Sprintf("    %s-addprefix:\n", app.ID))
+				sb.WriteString("      addPrefix:\n")
+				sb.WriteString(fmt.Sprintf("        prefix: \"%s\"\n\n", app.PathPrefix))
 			}
-			sb.WriteString("\n")
+			// Add basicAuth middleware if configured
+			if len(app.BasicAuth) > 0 {
+				sb.WriteString(fmt.Sprintf("    %s-basic-auth:\n", app.ID))
+				sb.WriteString("      basicAuth:\n")
+				sb.WriteString("        users:\n")
+				for _, entry := range app.BasicAuth {
+					// YAML-escape the hash — $ chars need to be quoted
+					sb.WriteString(fmt.Sprintf("          - %q\n", entry))
+				}
+				sb.WriteString("\n")
+			}
 		}
 	}
 

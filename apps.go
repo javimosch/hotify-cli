@@ -24,13 +24,14 @@ func setupApp(isUpsert bool) {
 	composeFile := cmd.String("compose-file", "", "Docker Compose file to use (e.g. compose.binary.yml)")
 	composePath := cmd.String("compose-path", "", "Path on remote where compose files live")
 	backendURL := cmd.String("backend-url", "", "Custom backend URL for external reverse proxy (e.g. http://100.114.4.57:8080)")
+	pathPrefix := cmd.String("path-prefix", "", "Path prefix for Traefik middleware (e.g., /slv2 for sl-cli sites)")
 	targetName := cmd.String("target", "", "Target name for remote execution")
 	local := cmd.Bool("local", false, "Execute locally (ignore target)")
 	cmd.Parse(filterHumanFlag(os.Args[2:]))
 
 	// Remote mode: forward to remote daemon
 	if !*local && *targetName != "" {
-		handleSetupAppRemote(*id, *name, *domain, *port, *command, *source, *composeFile, *composePath, *backendURL, *setupDNS, *ip, *targetName, format)
+		handleSetupAppRemote(*id, *name, *domain, *port, *command, *source, *composeFile, *composePath, *backendURL, *pathPrefix, *setupDNS, *ip, *targetName, format)
 		return
 	}
 
@@ -108,6 +109,9 @@ func setupApp(isUpsert bool) {
 		if *backendURL != "" {
 			app.BackendURL = *backendURL
 		}
+		if *pathPrefix != "" {
+			app.PathPrefix = *pathPrefix
+		}
 		config.Apps[existingIdx] = app
 	} else {
 		// New app — all required fields must be present
@@ -135,6 +139,7 @@ func setupApp(isUpsert bool) {
 			ComposeFile: *composeFile,
 			ComposePath: *composePath,
 			BackendURL:  *backendURL,
+			PathPrefix:  *pathPrefix,
 		})
 		existingIdx = len(config.Apps) - 1
 	}
@@ -358,7 +363,7 @@ func listApps() {
 
 // ─── Remote helpers ───────────────────────────────────────────────────────────
 
-func handleSetupAppRemote(appID, name, domain string, port int, command, src, composeFile, composePath, backendURL string, setupDNS bool, ip, targetName string, format OutputFormat) {
+func handleSetupAppRemote(appID, name, domain string, port int, command, src, composeFile, composePath, backendURL, pathPrefix string, setupDNS bool, ip, targetName string, format OutputFormat) {
 	target, err := getActiveTarget(targetName)
 	if err != nil {
 		exitTargetNotFound(format, err)
@@ -370,7 +375,7 @@ func handleSetupAppRemote(appID, name, domain string, port int, command, src, co
 	payload := map[string]interface{}{
 		"name": name, "domain": domain, "port": port, "cmd": command,
 		"source": src, "compose_file": composeFile, "compose_path": composePath,
-		"backend_url": backendURL, "setup_dns": setupDNS, "ip": ip,
+		"backend_url": backendURL, "path_prefix": pathPrefix, "setup_dns": setupDNS, "ip": ip,
 	}
 	result, err := client.SetupAppConfig(appID, payload)
 	if err != nil {

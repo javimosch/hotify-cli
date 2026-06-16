@@ -161,6 +161,9 @@ type App struct {
 	// If set, Traefik will route to this URL instead of http://127.0.0.1:<port>
 	// Example: "http://100.114.4.57:8080" for Tailscale network
 	BackendURL string `json:"backend_url,omitempty"`
+	// Path prefix for Traefik middleware (e.g., "/slv2" for sl-cli sites)
+	// If set, Traefik will add this prefix to requests before routing to backend
+	PathPrefix string `json:"path_prefix,omitempty"`
 }
 
 func getConfigPath() (string, error) {

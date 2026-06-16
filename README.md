@@ -186,6 +186,36 @@ Configuration is stored at `~/.hotify/config.json`:
 }
 ```
 
+### External Backend (Remote Apps)
+
+For apps running on a different machine behind the reverse proxy (e.g. via Tailscale),
+set `backend_url` to the remote machine's address:
+
+```json
+{
+  "id": "hermes-webui",
+  "name": "Hermes WebUI",
+  "domain": "hermes.rbm21.intrane.fr",
+  "port": 8787,
+  "command": "true",
+  "backend_url": "http://100.123.0.125:8787"
+}
+```
+
+When set, Traefik routes to this URL instead of the default `http://127.0.0.1:<port>`.
+
+**⚠️ Critical**: hotify-cli's `buildDynamicYAML()` regenerates the **entire** `/etc/traefik/dynamic.yml`
+when `setup-traefik` is called for **any single app**. If an app lacks `backend_url`,
+it falls back to `127.0.0.1:<port>`. This means remote apps lose their correct backend
+URL whenever Traefik config is regenerated for any app.
+
+**Two layers of protection against this regression:**
+
+1. **Always set `backend_url`** for remote apps in `config.json` (prevents the fallback)
+2. **Since v2.10.1**: `buildDynamicYAML` preserves existing backend URLs from the current
+   `dynamic.yml` as a fallback via `readExistingBackendURLs()`, so even if `backend_url`
+   is missing from config, the previously working URL is kept.
+
 ## Architecture
 
 ### File Structure
@@ -194,7 +224,7 @@ Configuration is stored at `~/.hotify/config.json`:
 - `daemon.go` - Daemon process management
 - `server.go` - HTTP server and web UI
 - `cloudflare.go` - Cloudflare API integration
-- `traefik.go` - Traefik configuration management
+- `traefik.go` - Traefik configuration management (contains `buildDynamicYAML` & `readExistingBackendURLs`)
 
 ### Traefik Integration
 
