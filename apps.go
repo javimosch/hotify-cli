@@ -4,8 +4,19 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 )
+
+// getFullDomain returns the full domain, avoiding double base domain suffix
+func getFullDomain(domain, baseDomain string) string {
+	// If domain already contains a dot, assume it's already a full domain
+	if strings.Contains(domain, ".") {
+		return domain
+	}
+	// Otherwise, append base domain
+	return fmt.Sprintf("%s.%s", domain, baseDomain)
+}
 
 // setupApp handles both "add" (new) and "setup" (upsert) logic.
 // isUpsert=false enforces unique ID (add), isUpsert=true allows update.
@@ -89,7 +100,7 @@ func setupApp(isUpsert bool) {
 			app.Name = *name
 		}
 		if *domain != "" {
-			app.Domain = fmt.Sprintf("%s.%s", *domain, config.Domain)
+			app.Domain = getFullDomain(*domain, config.Domain)
 		}
 		if *port != 0 {
 			app.Port = *port
@@ -131,7 +142,7 @@ func setupApp(isUpsert bool) {
 		config.Apps = append(config.Apps, App{
 			ID:          *id,
 			Name:        *name,
-			Domain:      fmt.Sprintf("%s.%s", *domain, config.Domain),
+			Domain:      getFullDomain(*domain, config.Domain),
 			Port:        *port,
 			Command:     *command,
 			Source:      *source,

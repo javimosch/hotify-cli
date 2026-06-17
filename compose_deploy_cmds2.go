@@ -286,7 +286,7 @@ func handleSetupComposeCLI() {
 			app.Name = *name
 		}
 		if *domain != "" {
-			app.Domain = fmt.Sprintf("%s.%s", *domain, config.Domain)
+			app.Domain = getFullDomain(*domain, config.Domain)
 		}
 		if *port != 0 {
 			app.Port = *port
@@ -317,7 +317,7 @@ func handleSetupComposeCLI() {
 		config.Apps = append(config.Apps, App{
 			ID:          *appID,
 			Name:        *name,
-			Domain:      fmt.Sprintf("%s.%s", *domain, config.Domain),
+			Domain:      getFullDomain(*domain, config.Domain),
 			Port:        *port,
 			Command:     *startCmd,
 			Status:      "stopped",
