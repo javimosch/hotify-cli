@@ -432,7 +432,9 @@ func pruneApp(appID string, config *Config) (map[string]interface{}, []string) {
 	tmpConfig := *config
 	tmpConfig.Apps = filtered
 
-	if err := updateDynamicConfig(&tmpConfig); err != nil {
+	// Use synchronous write for prune to ensure config is written before restart
+	// This bypasses the debounced writer to avoid race conditions
+	if err := writeDynamicConfigAtomic(&tmpConfig); err != nil {
 		warnings = append(warnings, fmt.Sprintf("Traefik config update failed: %v", err))
 		return map[string]interface{}{"app_id": appID, "status": "partial"}, warnings
 	}
