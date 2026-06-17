@@ -493,6 +493,89 @@ Hotify uses Cloudflare API to:
 - Create A records for subdomains
 - Configure DNS-only mode (proxy disabled)
 
+## Post-Install Security: Traefik Access Logs + Fail2ban
+
+After setting up Traefik (via `hotify-cli traefik-system`), **you MUST enable access logs and fail2ban** to protect against brute-force attacks on basic-auth-protected apps. Traefik's `basicAuth` middleware is stateless — it checks credentials on every request without tracking failures, making it trivially bypassable without this setup.
+
+### Step 1: Enable Traefik access logs
+
+Add `accessLog` to `/etc/traefik/traefik.yml`:
+
+```yaml
+accessLog:
+  filePath: "/var/log/traefik/access.log"
+  bufferingSize: 100
+```
+
+Then restart Traefik:
+```bash
+sudo mkdir -p /var/log/traefik
+sudo systemctl restart traefik
+```
+
+Verify logs are being written:
+```bash
+sudo tail -f /var/log/traefik/access.log
+# → 1.2.3.4 - admin [17/Jun/2026:06:47:47 +0000] "GET / HTTP/2.0" 401 17 ...
+```
+
+### Step 2: Install fail2ban Traefik jail
+
+Create `/etc/fail2ban/filter.d/traefik-auth-local.conf`:
+```ini
+[Definition]
+failregex = <HOST> - \S+ \[.*\] "\S+ \S+ \S+" 401\s
+ignoreregex =
+```
+
+Create `/etc/fail2ban/jail.d/traefik-auth.local`:
+```ini
+[traefik-auth]
+enabled   = true
+filter    = traefik-auth-local
+backend   = polling
+port      = http,https
+logpath   = /var/log/traefik/access.log
+maxretry  = 5
+findtime  = 600
+bantime   = 3600
+ignoreip  = 127.0.0.0/8 <server-public-ip>
+```
+
+Reload fail2ban and verify:
+```bash
+sudo fail2ban-client reload
+sudo fail2ban-client status traefik-auth
+```
+
+**Make sure to add the server's own public IP to `ignoreip`** so internal services aren't locked out.
+
+### How it works
+
+| Threshold | Action |
+|-----------|--------|
+| 5 failed auth attempts in 10 minutes | iptables ban on ports 80/443 for 1 hour |
+| All Traefik-proxied services blocked | Brute force on any app → locked out of all apps |
+
+This means an attacker failing basic auth on powersentry gets blocked from ALL hotify-managed apps on that server (cmdcenter, discovery, etc.).
+
+### Verification
+
+```bash
+# Simulate bad auth attempts (from outside the server)
+for i in $(seq 1 6); do
+  curl -s -o /dev/null -u "admin:wrong$i" \
+    https://your-app.domain.com/ 2>/dev/null
+done
+
+# Check fail2ban
+sudo fail2ban-client status traefik-auth
+# → Banned IP list: your.ip.here (after 5th attempt, 6th gets blocked)
+
+# Unban if needed
+sudo fail2ban-client set traefik-auth unbanip <banned-ip>
+```
+
 ### Prerequisites for Agents
 
 - Cloudflare API token with DNS edit permissions
