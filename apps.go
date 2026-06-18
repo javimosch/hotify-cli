@@ -8,10 +8,13 @@ import (
 	"time"
 )
 
-// getFullDomain returns the full domain, avoiding double base domain suffix
+// getFullDomain returns the full domain, avoiding double base domain suffix.
+// If the domain already ends with the base domain (e.g. "gob.dk1.intrane.fr"
+// when base is "intrane.fr"), it is returned as-is.  Otherwise the base is
+// appended, so "gob.dk1" becomes "gob.dk1.intrane.fr".
 func getFullDomain(domain, baseDomain string) string {
-	// If domain already contains a dot, assume it's already a full domain
-	if strings.Contains(domain, ".") {
+	// If domain already ends with the base domain, use it as-is
+	if strings.HasSuffix(domain, "."+baseDomain) {
 		return domain
 	}
 	// Otherwise, append base domain

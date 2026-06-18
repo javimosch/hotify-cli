@@ -650,8 +650,11 @@ func setupTraefikForAppWithChallengeAndRedirect(appID string, challengeType Trae
 		return fmt.Errorf("error setting up traefik service: %v", err)
 	}
 
-	if err := updateDynamicConfig(config); err != nil {
-		return fmt.Errorf("error updating dynamic config: %v", err)
+	// Write the dynamic config synchronously before restarting Traefik.
+	// The debounced writer (updateDynamicConfig) is fine for routine changes
+	// but here we must ensure the YAML is on disk before Traefik restarts.
+	if err := writeDynamicConfigAtomic(config); err != nil {
+		return fmt.Errorf("error writing dynamic config: %v", err)
 	}
 
 	if err := restartTraefik(); err != nil {
