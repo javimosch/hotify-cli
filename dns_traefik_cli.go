@@ -76,6 +76,10 @@ func handleSetupDNSCLI() {
 			},
 			Metadata: map[string]interface{}{"warnings": warnings},
 		}, format)
+
+		// Cross-suggest: if Traefik is not configured, suggest it
+		suggestMissingTraefikSetup(*id)
+
 		return
 	}
 
