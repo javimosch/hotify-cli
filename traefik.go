@@ -670,6 +670,10 @@ func setupTraefikForAppWithChallengeAndRedirect(appID string, challengeType Trae
 		redirectNote = " (HTTP redirect disabled)"
 	}
 	fmt.Printf("✅ Traefik configured for app: %s (challenge: %s)%s%s\n", appID, challengeType, dockerNote, redirectNote)
+
+	// Cross-suggest: if DNS is not configured, suggest it
+	suggestMissingDNSSetup(appID)
+
 	return nil
 }
 

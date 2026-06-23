@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 // handleSetupDNSCLI handles: hotify-cli setup-dns --id <id> [--ip <ip>] [--target <name>] [--local]
@@ -114,6 +116,9 @@ func handleSetupDNSCLI() {
 			"action": "dns_configured",
 		},
 	}, format)
+
+	// Cross-suggest: if Traefik is not configured for this app, suggest it
+	suggestMissingTraefikSetup(*id)
 }
 
 // handleSetupTraefikCLI handles: hotify-cli setup-traefik --id <id> [--challenge-type http|dns] [--no-redirect] [--dry-run] [--target <name>] [--local]
@@ -291,4 +296,84 @@ func handleSetupTraefikCLI() {
 			"action":            "traefik_configured",
 		},
 	}, format)
+
+	// Cross-suggest: if DNS is not configured, suggest it
+	suggestMissingDNSSetup(*id)
+}
+
+// ─── Cross-suggestion helpers ───────────────────────────────────────────
+
+// suggestMissingDNSSetup checks if the app's domain has a DNS record in
+// Cloudflare. If not, it prints a suggestion to run setup-dns.
+func suggestMissingDNSSetup(appID string) {
+	config, err := loadConfig()
+	if err != nil {
+		return
+	}
+
+	var app *App
+	for i := range config.Apps {
+		if config.Apps[i].ID == appID {
+			app = &config.Apps[i]
+			break
+		}
+	}
+	if app == nil || app.Domain == "" {
+		return
+	}
+
+	// Check if DNS record exists via Cloudflare
+	if config.CloudflareToken == "" || config.AdminEmail == "" {
+		return
+	}
+
+	zoneID, err := getZoneID(app.Domain, config.CloudflareToken, config.AdminEmail)
+	if err != nil {
+		return
+	}
+
+	if _, _, found := existingDNSRecord(app.Domain, zoneID, config.CloudflareToken, config.AdminEmail); !found {
+		fmt.Fprintf(os.Stderr, "\n⚠️  No DNS record found for %s.\n", app.Domain)
+		fmt.Fprintf(os.Stderr, "   Run: hotify-cli setup-dns --id %s [--ip <public-ip>]\n\n", appID)
+	}
+}
+
+// suggestMissingTraefikSetup checks if the app has a router in Traefik's
+// dynamic config. If not, it prints a suggestion to run setup-traefik.
+func suggestMissingTraefikSetup(appID string) {
+	config, err := loadConfig()
+	if err != nil {
+		return
+	}
+
+	var app *App
+	for i := range config.Apps {
+		if config.Apps[i].ID == appID {
+			app = &config.Apps[i]
+			break
+		}
+	}
+	if app == nil {
+		return
+	}
+
+	// Check if Traefik dynamic config has a router for this app
+	data, err := os.ReadFile(traefikDynamic)
+	if err != nil {
+		return
+	}
+
+	var dyn struct {
+		HTTP struct {
+			Routers map[string]interface{} `yaml:"routers"`
+		} `yaml:"http"`
+	}
+	if err := yaml.Unmarshal(data, &dyn); err != nil {
+		return
+	}
+
+	if _, exists := dyn.HTTP.Routers[appID]; !exists {
+		fmt.Fprintf(os.Stderr, "\n⚠️  No Traefik route found for app '%s'.\n", appID)
+		fmt.Fprintf(os.Stderr, "   Run: hotify-cli setup-traefik --id %s [--challenge-type dns]\n\n", appID)
+	}
 }
