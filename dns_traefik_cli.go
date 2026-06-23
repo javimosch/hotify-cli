@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 )
 
 // handleSetupDNSCLI handles: hotify-cli setup-dns --id <id> [--ip <ip>] [--target <name>] [--local]
@@ -115,13 +116,14 @@ func handleSetupDNSCLI() {
 	}, format)
 }
 
-// handleSetupTraefikCLI handles: hotify-cli setup-traefik --id <id> [--challenge-type http|dns] [--no-redirect] [--target <name>] [--local]
+// handleSetupTraefikCLI handles: hotify-cli setup-traefik --id <id> [--challenge-type http|dns] [--no-redirect] [--dry-run] [--target <name>] [--local]
 func handleSetupTraefikCLI() {
 	format := getOutputFormat()
 	cmd := flag.NewFlagSet("setup-traefik", flag.ExitOnError)
 	id := cmd.String("id", "", "App ID (required)")
 	challengeType := cmd.String("challenge-type", "http", "ACME challenge type: http or dns (default: http)")
 	noRedirect := cmd.Bool("no-redirect", false, "Disable HTTP-to-HTTPS redirect (useful for ACME troubleshooting)")
+	dryRun := cmd.Bool("dry-run", false, "Preview changes without applying (diff)")
 	target := cmd.String("target", "", "Target name (uses default if not specified)")
 	local := cmd.Bool("local", false, "Execute directly on local server")
 	cmd.Parse(filterHumanFlag(os.Args[2:]))
@@ -167,6 +169,47 @@ func handleSetupTraefikCLI() {
 
 	if *local {
 		// Local mode: execute directly on local server
+
+		// If --dry-run, show diff and exit without making changes
+		if *dryRun {
+			config, err := loadConfig()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
+				os.Exit(ExitGenericFailure)
+			}
+
+			diff, err := DryRunDiff(config)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error computing diff: %v\n", err)
+				os.Exit(ExitGenericFailure)
+			}
+
+			if diff == "" {
+				fmt.Println("No changes — current config matches proposed config.")
+			} else {
+				fmt.Println("📋 Proposed Traefik changes (--dry-run):")
+				fmt.Println()
+				for _, line := range strings.Split(diff, "\n") {
+					if len(line) == 0 {
+						continue
+					}
+					prefix := line[0]
+					content := line[1:]
+					switch prefix {
+					case '+':
+						fmt.Printf("  \033[32m+ %s\033[0m\n", content)
+					case '-':
+						fmt.Printf("  \033[31m- %s\033[0m\n", content)
+					default:
+						fmt.Printf("    %s\n", content)
+					}
+				}
+			}
+			fmt.Println()
+			fmt.Println("Dry run — no changes were made.")
+			return
+		}
+
 		var err error
 		if *noRedirect {
 			// Use explicit redirect control when flag is provided
