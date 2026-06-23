@@ -26,6 +26,7 @@ func handleBasicAuth() {
 	user   := cmd.String("user",     "", "Username for add/remove")
 	pass   := cmd.String("password", "", "Plaintext password (hashed client-side with APR1-MD5)")
 	hash   := cmd.String("hash",     "", "Pre-hashed htpasswd entry (e.g. user:$apr1$...). Skips hashing.")
+	dryRun := cmd.Bool("dry-run",  false, "Preview changes without applying")
 	target := cmd.String("target",   "", "Target name (uses default if not specified)")
 	local  := cmd.Bool("local",    false, "Execute directly on local server")
 	cmd.Parse(filterHumanFlag(os.Args[2:]))
@@ -50,7 +51,7 @@ func handleBasicAuth() {
 
 	if *local {
 		// Local mode: execute directly on local server
-		handleBasicAuthLocal(*appID, *action, *user, *pass, *hash, format)
+		handleBasicAuthLocal(*appID, *action, *user, *pass, *hash, *dryRun, format)
 		return
 	}
 
@@ -63,7 +64,7 @@ func handleBasicAuth() {
 }
 
 // handleBasicAuthLocal executes basic auth operations locally.
-func handleBasicAuthLocal(appID, action, user, pass, hash string, format OutputFormat) {
+func handleBasicAuthLocal(appID, action, user, pass, hash string, dryRun bool, format OutputFormat) {
 	config, err := loadConfig()
 	if err != nil {
 		exitConfigError(format, err)
@@ -102,7 +103,6 @@ func handleBasicAuthLocal(appID, action, user, pass, hash string, format OutputF
 	case "add":
 		var entry string
 		if hash != "" {
-			// Pre-hashed entry provided directly
 			if !strings.Contains(hash, ":") {
 				printOutput(CommandResult{
 					Version: Version, Success: false,
@@ -146,10 +146,8 @@ func handleBasicAuthLocal(appID, action, user, pass, hash string, format OutputF
 			}
 		}
 
-		// Extract username from entry for duplicate check
 		entryUser := strings.SplitN(entry, ":", 2)[0]
 
-		// Remove any existing entry for this user first (update semantics)
 		newAuth := make([]string, 0, len(app.BasicAuth)+1)
 		replaced := false
 		for _, e := range app.BasicAuth {
@@ -161,7 +159,27 @@ func handleBasicAuthLocal(appID, action, user, pass, hash string, format OutputF
 		}
 		newAuth = append(newAuth, entry)
 
-		// Persist
+		if dryRun {
+			verb := "added"
+			if replaced { verb = "updated" }
+			if format == OutputFormatText {
+				fmt.Printf("📋 Dry-run — would %s user '%s' for app '%s'\n", verb, entryUser, appID)
+				fmt.Printf("   Current users: %d\n", len(app.BasicAuth))
+				fmt.Printf("   Resulting users: %d\n", len(newAuth))
+				fmt.Println("   No changes were made.")
+			} else {
+				printOutput(CommandResult{
+					Version: Version, Success: true,
+					Data: map[string]interface{}{
+						"app_id":  appID, "user": entryUser, "action": verb,
+						"dry_run": true, "current_count": len(app.BasicAuth),
+						"resulting_count": len(newAuth),
+					},
+				}, format)
+			}
+			return
+		}
+
 		for i := range config.Apps {
 			if config.Apps[i].ID == appID {
 				config.Apps[i].BasicAuth = newAuth
@@ -172,17 +190,12 @@ func handleBasicAuthLocal(appID, action, user, pass, hash string, format OutputF
 			exitConfigError(format, err)
 		}
 
-		action := "added"
-		if replaced {
-			action = "updated"
-		}
+		verb := "added"
+		if replaced { verb = "updated" }
 		printOutput(CommandResult{
 			Version: Version, Success: true,
 			Data: map[string]interface{}{
-				"app_id":  appID,
-				"user":    entryUser,
-				"action":  action,
-				"count":   len(newAuth),
+				"app_id":  appID, "user": entryUser, "action": verb, "count": len(newAuth),
 			},
 			Metadata: map[string]interface{}{
 				"next_step": "run 'hotify-cli setup-traefik --id " + appID + "' to apply changes",
@@ -223,6 +236,24 @@ func handleBasicAuthLocal(appID, action, user, pass, hash string, format OutputF
 				},
 			}, format)
 			os.Exit(ExitInvalidArgument)
+		}
+
+		if dryRun {
+			if format == OutputFormatText {
+				fmt.Printf("📋 Dry-run — would remove user '%s' from app '%s'\n", user, appID)
+				fmt.Printf("   Current users: %d → remaining: %d\n", len(app.BasicAuth), len(newAuth))
+				fmt.Println("   No changes were made.")
+			} else {
+				printOutput(CommandResult{
+					Version: Version, Success: true,
+					Data: map[string]interface{}{
+						"app_id": appID, "user": user, "action": "removed",
+						"dry_run": true, "current_count": len(app.BasicAuth),
+						"resulting_count": len(newAuth),
+					},
+				}, format)
+			}
+			return
 		}
 
 		for i := range config.Apps {
