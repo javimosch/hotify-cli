@@ -1,4 +1,18 @@
-# Hotify CLI - Agent Documentation (v2.9.0)
+# Hotify CLI - Agent Documentation (v2.10.1)
+
+## Agent Quick Start
+
+> **Run `hotify-cli guide` first.** It emits the complete command catalog —
+> every command, its flags, the canonical ordering for common workflows, and
+> cross-command suggestions — as JSON (agent-friendly). The catalog lives in
+> the binary so it is always version-exact.
+>
+> ```sh
+> hotify-cli guide                       # full catalog as JSON
+> hotify-cli guide --text                 # human-readable prose
+> hotify-cli guide | jq '.commands[] | select(.category == "dns-traefik")'
+> hotify-cli guide | jq '.workflows[] | select(.name == "new-app")'
+> ```
 
 ## Overview
 Hotify is a CLI+UI tool for managing Traefik/Cloudflare app deployment. It automates DNS setup, SSL certificates, and reverse proxy configuration for web apps.
