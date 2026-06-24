@@ -1,21 +1,19 @@
-# Binaries
-hotify-cli
-hotify-cli-optimized
 
-# Config files (local)
-.hotify/
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
 *~
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Logs
-*.log
 .beads/
+# Binaries
+# Config files (local)
+.DS_Store
+.hotify/
+hotify-cli
+hotify-cli-linux
+hotify-cli-optimized
+# IDE
+.idea/
+*.log
+# Logs
+# OS
+*.swo
+*.swp
+Thumbs.db
+.vscode/
