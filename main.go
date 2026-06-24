@@ -97,6 +97,11 @@ func main() {
 		handleAPIKeysCLI()
 
 	// Misc
+	case "guide":
+		if err := cmdGuide(os.Args[2:]); err != nil {
+			fmt.Fprintf(os.Stderr, "guide error: %v\n", err)
+			os.Exit(1)
+		}
 	case "version":
 		fmt.Printf("hotify-cli v%s\n", Version)
 	case "help", "--help", "-h":
@@ -192,6 +197,10 @@ func printHelp() {
 	fmt.Println("  auth            Authenticate with remote hotify daemon")
 	fmt.Println("  targets         Manage deployment targets")
 	fmt.Println("  api-keys        Manage API keys on remote daemon")
+	fmt.Println()
+	fmt.Println("Self-description:")
+	fmt.Println("  guide           Emit machine-readable command catalog (JSON). Agent entry point.")
+	fmt.Println("                  Add --text for human-readable prose.")
 	fmt.Println()
 	fmt.Println("Output:")
 	fmt.Println("  Default output is JSON (agent-friendly)")
