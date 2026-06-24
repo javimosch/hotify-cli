@@ -379,28 +379,36 @@ func readExistingBackendURLs() map[string]string {
 		return urls // file doesn't exist yet or can't be read — fine
 	}
 
+	// The services section has this layout:
+	//   services:          ← indent 2 (skip)
+	//     app-id:          ← indent 4 (match as app ID)
+	//       loadBalancer:  ← indent 6 (skip)
+	//         servers:     ← indent 8 (skip)
+	//           - url: ".." ← indent 10 (extract)
+	//
+	// We search only inside the services section, matching app IDs at
+	// exactly 4-space indent, then extracting the backend URL from the
+	// next "- url: ..." line.
+
 	lines := strings.Split(string(data), "\n")
 	var currentApp string
 	for _, line := range lines {
+		leading := len(line) - len(strings.TrimLeft(line, " "))
 		trimmed := strings.TrimSpace(line)
-		if strings.HasSuffix(trimmed, ":") && !strings.HasPrefix(trimmed, "-") {
-			// crude but reliable: services are top-level keys under "http:"
-			// that end with ":" and aren't list items.
-			if currentApp == "" {
-				// Skip top-level sections (routers, services, middlewares)
-				continue
-			}
-		}
-		// Detect the "services:" section
-		if trimmed == "services:" {
+
+		// Skip section-level keys (http:, routers:, services:)
+		// and any line at < 4-space indent that ends with ":".
+		if leading < 4 && strings.HasSuffix(trimmed, ":") && !strings.HasPrefix(trimmed, "-") {
 			continue
 		}
-		// Detect an app id line right under services: (e.g. "    hermes-webui:")
-		if strings.HasPrefix(line, "    ") && strings.HasSuffix(trimmed, ":") && !strings.Contains(trimmed, " ") {
+
+		// Match app IDs at exactly 4-space indent, ending with ":", no spaces in key name.
+		if leading == 4 && strings.HasSuffix(trimmed, ":") && !strings.Contains(trimmed, " ") {
 			currentApp = strings.TrimSuffix(trimmed, ":")
 			continue
 		}
-		// Extract URL from "- url: \"http://...\""
+
+		// Extract URL from "- url: \"http://...\"" under the current app.
 		if currentApp != "" && strings.Contains(trimmed, "url:") {
 			parts := strings.SplitN(trimmed, "\"", 3)
 			if len(parts) >= 2 {
