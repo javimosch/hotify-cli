@@ -164,6 +164,9 @@ type App struct {
 	// Path prefix for Traefik middleware (e.g., "/slv2" for sl-cli sites)
 	// If set, Traefik will add this prefix to requests before routing to backend
 	PathPrefix string `json:"path_prefix,omitempty"`
+	// RateLimit defines a rate limit for this app, e.g. "10,60m" = 10 requests per 60 minutes.
+	// Applied as a Traefik rateLimit middleware when setup-traefik runs.
+	RateLimit string `json:"rate_limit,omitempty"`
 }
 
 func getConfigPath() (string, error) {

@@ -133,6 +133,7 @@ func handleSetupTraefikCLI() {
 	challengeType := cmd.String("challenge-type", "http", "ACME challenge type: http or dns (default: http)")
 	noRedirect := cmd.Bool("no-redirect", false, "Disable HTTP-to-HTTPS redirect (useful for ACME troubleshooting)")
 	dryRun := cmd.Bool("dry-run", false, "Preview changes without applying (diff)")
+	rateLimit := cmd.String("rate-limit", "", "Rate limit: 'count,period' e.g. '10,60m' (stored in config, applied via setup-traefik)")
 	target := cmd.String("target", "", "Target name (uses default if not specified)")
 	local := cmd.Bool("local", false, "Execute directly on local server")
 	cmd.Parse(filterHumanFlag(os.Args[2:]))
@@ -178,6 +179,20 @@ func handleSetupTraefikCLI() {
 
 	if *local {
 		// Local mode: execute directly on local server
+
+		// If --rate-limit was provided, save it to config (before dry-run, so both see it)
+		if *rateLimit != "" {
+			cfg, err := loadConfig()
+			if err == nil {
+				for i := range cfg.Apps {
+					if cfg.Apps[i].ID == *id {
+						cfg.Apps[i].RateLimit = *rateLimit
+						saveConfig(cfg)
+						break
+					}
+				}
+			}
+		}
 
 		// If --dry-run, show diff and exit without making changes
 		if *dryRun {

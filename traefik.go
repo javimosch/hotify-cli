@@ -390,6 +390,13 @@ func readExistingBackendURLs() map[string]string {
 	// exactly 4-space indent, then extracting the backend URL from the
 	// next "- url: ..." line.
 
+	// Count leading spaces to determine indent level.  Two-space increments
+	// mean indent 0/2 = top-level section, 4 = app-ID, 6+ = sub-keys.
+	const (
+		indentSection = 2
+		indentApp     = 4
+	)
+
 	lines := strings.Split(string(data), "\n")
 	var currentApp string
 	for _, line := range lines {
@@ -398,12 +405,12 @@ func readExistingBackendURLs() map[string]string {
 
 		// Skip section-level keys (http:, routers:, services:)
 		// and any line at < 4-space indent that ends with ":".
-		if leading < 4 && strings.HasSuffix(trimmed, ":") && !strings.HasPrefix(trimmed, "-") {
+		if leading < indentApp && strings.HasSuffix(trimmed, ":") && !strings.HasPrefix(trimmed, "-") {
 			continue
 		}
 
 		// Match app IDs at exactly 4-space indent, ending with ":", no spaces in key name.
-		if leading == 4 && strings.HasSuffix(trimmed, ":") && !strings.Contains(trimmed, " ") {
+		if leading == indentApp && strings.HasSuffix(trimmed, ":") && !strings.Contains(trimmed, " ") {
 			currentApp = strings.TrimSuffix(trimmed, ":")
 			continue
 		}
@@ -449,8 +456,18 @@ func buildDynamicYAML(config *Config) (string, error) {
 			} else {
 				sb.WriteString(fmt.Sprintf("      middlewares:\n        - %s-addprefix\n", app.ID))
 			}
-		} else if len(app.BasicAuth) > 0 {
-			sb.WriteString(fmt.Sprintf("      middlewares:\n        - %s-basic-auth\n", app.ID))
+		} else if len(app.BasicAuth) > 0 || app.RateLimit != "" {
+			var mids []string
+			if len(app.BasicAuth) > 0 {
+				mids = append(mids, app.ID+"-basic-auth")
+			}
+			if app.RateLimit != "" {
+				mids = append(mids, app.ID+"-rate-limit")
+			}
+			sb.WriteString(fmt.Sprintf("      middlewares:\n"))
+			for _, m := range mids {
+				sb.WriteString(fmt.Sprintf("        - %s\n", m))
+			}
 		}
 		sb.WriteString("      tls:\n")
 		sb.WriteString("        certResolver: letsencrypt\n")
@@ -477,10 +494,10 @@ func buildDynamicYAML(config *Config) (string, error) {
 		}
 	}
 
-	// Emit middlewares section for apps that have basicAuth entries or path_prefix
+	// Emit middlewares section for apps that need them
 	hasMiddleware := false
 	for _, app := range config.Apps {
-		if len(app.BasicAuth) > 0 || app.PathPrefix != "" {
+		if len(app.BasicAuth) > 0 || app.PathPrefix != "" || app.RateLimit != "" {
 			hasMiddleware = true
 			break
 		}
@@ -488,8 +505,8 @@ func buildDynamicYAML(config *Config) (string, error) {
 	if hasMiddleware {
 		sb.WriteString("  middlewares:\n")
 		for _, app := range config.Apps {
-			// Skip if no middleware needed
-			if len(app.BasicAuth) == 0 && app.PathPrefix == "" {
+			needsMiddleware := len(app.BasicAuth) > 0 || app.PathPrefix != "" || app.RateLimit != ""
+			if !needsMiddleware {
 				continue
 			}
 			// Add addPrefix middleware if path_prefix is set
@@ -504,10 +521,22 @@ func buildDynamicYAML(config *Config) (string, error) {
 				sb.WriteString("      basicAuth:\n")
 				sb.WriteString("        users:\n")
 				for _, entry := range app.BasicAuth {
-					// YAML-escape the hash — $ chars need to be quoted
 					sb.WriteString(fmt.Sprintf("          - %q\n", entry))
 				}
 				sb.WriteString("\n")
+			}
+			// Add rateLimit middleware if configured
+			if app.RateLimit != "" {
+				parts := strings.SplitN(app.RateLimit, ",", 2)
+				if len(parts) == 2 {
+					average := strings.TrimSpace(parts[0])
+					period := strings.TrimSpace(parts[1])
+					sb.WriteString(fmt.Sprintf("    %s-rate-limit:\n", app.ID))
+					sb.WriteString("      rateLimit:\n")
+					sb.WriteString(fmt.Sprintf("        average: %s\n", average))
+					sb.WriteString(fmt.Sprintf("        period: %s\n", period))
+					sb.WriteString("        burst: " + average + "\n\n")
+				}
 			}
 		}
 	}
