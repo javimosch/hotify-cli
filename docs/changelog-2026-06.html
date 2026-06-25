@@ -38,28 +38,67 @@
 
       <!-- Product Changelog -->
       <div id="content-product" class="tab-content active">
-<div class="feature-card rounded-xl p-6">
-  <div class="flex items-start gap-4">
-    <div class="w-12 h-12 rounded-lg bg-green-500/10 flex items-center justify-center flex-shrink-0">
-      <span class="text-2xl">🛡️</span>
-    </div>
-    <div>
-      <h3 class="text-xl font-semibold text-white mb-2">Atomic Config Management</h3>
-      <p class="text-slate-400 leading-relaxed">v2.10.1 introduces debounced writes, mutex-protected config, and crash-safe atomic file operations. This prevents race conditions that could silently drop configuration fields (like BackendURL) and eliminates Traefik watch reloads of partially-written files. All config changes are now grouped within a 5-second window and flushed atomically.</p>
-    </div>
-  </div>
-</div>
-<div class="feature-card rounded-xl p-6">
-  <div class="flex items-start gap-4">
-    <div class="w-12 h-12 rounded-lg bg-blue-500/10 flex items-center justify-center flex-shrink-0">
-      <span class="text-2xl">🌐</span>
-    </div>
-    <div>
-      <h3 class="text-xl font-semibold text-white mb-2">Complete Remote/Targets Support</h3>
-      <p class="text-slate-400 leading-relaxed">All hotify-cli commands now support full remote execution via --target flag and local execution via --local flag. This includes deployment commands, app configuration management, Docker operations, pruning, and Docker Compose passthrough — achieving complete SSH independence.</p>
-    </div>
-  </div>
-</div>
+
+        <div class="feature-card rounded-xl p-6">
+          <div class="flex items-start gap-4">
+            <div class="w-12 h-12 rounded-lg bg-blue-500/10 flex items-center justify-center flex-shrink-0">
+              <span class="text-2xl">🧭</span>
+            </div>
+            <div>
+              <h3 class="text-xl font-semibold text-white mb-2">Agent Guide — Self-Describing CLI</h3>
+              <p class="text-slate-400 leading-relaxed">New <code class="text-blue-400">guide</code> command emits the complete command catalog as JSON — every command, flag, and workflow — so AI agents can learn the entire surface in one call. Like <code class="text-blue-400">machin guide</code>, the catalog lives in the binary and is always version-exact. Run <code class="text-blue-400">hotify-cli guide</code> to get started.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="feature-card rounded-xl p-6">
+          <div class="flex items-start gap-4">
+            <div class="w-12 h-12 rounded-lg bg-emerald-500/10 flex items-center justify-center flex-shrink-0">
+              <span class="text-2xl">🛡️</span>
+            </div>
+            <div>
+              <h3 class="text-xl font-semibold text-white mb-2">Rate-Limiting Middleware</h3>
+              <p class="text-slate-400 leading-relaxed">Protect apps from abuse with Traefik rate-limit middleware. Add <code class="text-blue-400">--rate-limit "10,60m"</code> to <code class="text-blue-400">setup-traefik</code> to limit requests per time period. Chains with existing basic-auth middleware automatically.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="feature-card rounded-xl p-6">
+          <div class="flex items-start gap-4">
+            <div class="w-12 h-12 rounded-lg bg-purple-500/10 flex items-center justify-center flex-shrink-0">
+              <span class="text-2xl">🔧</span>
+            </div>
+            <div>
+              <h3 class="text-xl font-semibold text-white mb-2">Remote Backend URL Fix</h3>
+              <p class="text-slate-400 leading-relaxed">Fixed a critical bug where running <code class="text-blue-400">setup-traefik</code> for any single app reset ALL apps' backend URLs to <code class="text-blue-400">127.0.0.1</code>, breaking remote apps proxied via Tailscale (odysseus, hermes-webui, etc.). The <code class="text-blue-400">readExistingBackendURLs</code> parser was completely broken since introduction — two bugs (gatekeeping + indent matching) made it always return an empty map.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="feature-card rounded-xl p-6">
+          <div class="flex items-start gap-4">
+            <div class="w-12 h-12 rounded-lg bg-amber-500/10 flex items-center justify-center flex-shrink-0">
+              <span class="text-2xl">🔍</span>
+            </div>
+            <div>
+              <h3 class="text-xl font-semibold text-white mb-2">Safe Preview & Cross-Suggestions</h3>
+              <p class="text-slate-400 leading-relaxed">New <code class="text-blue-400">--dry-run</code> flag on <code class="text-blue-400">setup-traefik</code> and <code class="text-blue-400">basic-auth</code> lets you preview changes before applying them. Commands now cross-suggest next steps after completion (e.g., <code class="text-blue-400">setup-dns</code> suggests running <code class="text-blue-400">setup-traefik</code>).</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="feature-card rounded-xl p-6">
+          <div class="flex items-start gap-4">
+            <div class="w-12 h-12 rounded-lg bg-slate-500/10 flex items-center justify-center flex-shrink-0">
+              <span class="text-2xl">📎</span>
+            </div>
+            <div>
+              <h3 class="text-xl font-semibold text-white mb-2">Path Prefix & Stability</h3>
+              <p class="text-slate-400 leading-relaxed">New <code class="text-blue-400">--path-prefix</code> support for Traefik addPrefix middleware (e.g., <code class="text-blue-400">/slv2</code> for sl-cli sites). Fixed double domain suffix bug, eliminated race conditions in dynamic config writes with atomic file operations, and added fail2ban brute-force protection docs.</p>
+            </div>
+          </div>
+        </div>
+
       </div>
 
       <!-- Technical Changelog -->
@@ -71,8 +110,27 @@
             <span>🚀</span> Features
           </h2>
           <ul class="space-y-2 text-slate-300">
-            <li><span class="text-slate-500 text-sm mr-3">[12/06]</span>fix: debounced atomic dynamic.yml writer + serialised config load/save</li>
+            <li><span class="text-slate-500 text-sm mr-3">[24/06]</span>feat: add 'hotify-cli guide' command with embedded agent skill catalog</li>
+            <li><span class="text-slate-500 text-sm mr-3">[24/06]</span>feat: add rate-limit middleware support</li>
+            <li><span class="text-slate-500 text-sm mr-3">[24/06]</span>feat: add --dry-run to basic-auth command</li>
+            <li><span class="text-slate-500 text-sm mr-3">[23/06]</span>feat: cross-suggest missing steps in setup-dns/setup-traefik</li>
+            <li><span class="text-slate-500 text-sm mr-3">[23/06]</span>feat: add --dry-run to setup-traefik for safe diff/preview</li>
+            <li><span class="text-slate-500 text-sm mr-3">[16/06]</span>feat: Add path_prefix support for Traefik middleware</li>
             <li><span class="text-slate-500 text-sm mr-3">[03/06]</span>feat: complete remote/targets gap roadmap (P1-P5)</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2 class="text-2xl font-semibold text-red-400 mb-4 flex items-center gap-2">
+            <span>🐛</span> Bug Fixes
+          </h2>
+          <ul class="space-y-2 text-slate-300">
+            <li><span class="text-slate-500 text-sm mr-3">[24/06]</span>fix: readExistingBackendURLs parser broken by indent + gatekeeping bugs</li>
+            <li><span class="text-slate-500 text-sm mr-3">[23/06]</span>fix: move cross-suggestion before return in setup-dns local mode</li>
+            <li><span class="text-slate-500 text-sm mr-3">[18/06]</span>fix: use synchronous writes for Traefik config to prevent race conditions</li>
+            <li><span class="text-slate-500 text-sm mr-3">[17/06]</span>fix: use synchronous write in pruneApp to avoid race conditions</li>
+            <li><span class="text-slate-500 text-sm mr-3">[17/06]</span>fix: Prevent double base domain suffix in domain names</li>
+            <li><span class="text-slate-500 text-sm mr-3">[12/06]</span>fix: debounced atomic dynamic.yml writer + serialised config load/save</li>
           </ul>
         </section>
 
@@ -81,9 +139,11 @@
             <span>📚</span> Documentation
           </h2>
           <ul class="space-y-2 text-slate-300">
-            <li><span class="text-slate-500 text-sm mr-3">[12/06]</span>docs: add quick install via curl to README</li>
-            <li><span class="text-slate-500 text-sm mr-3">[12/06]</span>docs: update landing page with atomic config management feature</li>
-            <li><span class="text-slate-500 text-sm mr-3">[12/06]</span>docs: update changelog with v2.10.1 changes</li>
+            <li><span class="text-slate-500 text-sm mr-3">[24/06]</span>docs: point agents to 'hotify-cli guide' as entry point</li>
+            <li><span class="text-slate-500 text-sm mr-3">[17/06]</span>docs: add fail2ban brute-force protection as required post-install step for Traefik</li>
+            <li><span class="text-slate-500 text-sm mr-3">[12/06]</span>docs: v2.10.1 release notes + quick install via curl</li>
+            <li><span class="text-slate-500 text-sm mr-3">[03/06]</span>docs: add zero-shot agentic integration selling point</li>
+            <li><span class="text-slate-500 text-sm mr-3">[03/06]</span>docs: update static landing and add June 2026 changelog</li>
             <li><span class="text-slate-500 text-sm mr-3">[03/06]</span>docs: update hotify skill with v2.10.0 remote/targets features</li>
           </ul>
         </section>
@@ -93,8 +153,17 @@
             <span>⚙️</span> Miscellaneous Tasks
           </h2>
           <ul class="space-y-2 text-slate-300">
-            <li><span class="text-slate-500 text-sm mr-3">[12/06]</span>chore: bump version to v2.10.1</li>
+            <li><span class="text-slate-500 text-sm mr-3">[24/06]</span>chore: ignore binary</li>
             <li><span class="text-slate-500 text-sm mr-3">[03/06]</span>chore: bump version to v2.10.0</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2 class="text-2xl font-semibold text-purple-400 mb-4 flex items-center gap-2">
+            <span>💼</span> Other
+          </h2>
+          <ul class="space-y-2 text-slate-300">
+            <li><span class="text-slate-500 text-sm mr-3">[24/06]</span>Merge branch 'fix/read-existing-urls'</li>
           </ul>
         </section>
         </div>
