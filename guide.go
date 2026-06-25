@@ -32,6 +32,11 @@ type guideCommand struct {
 	Note        string      `json:"note,omitempty"`
 }
 
+type guideNote struct {
+	Topic   string `json:"topic"`
+	Detail  string `json:"detail"`
+}
+
 type guideWorkflow struct {
 	Name   string   `json:"name"`
 	Steps  []string `json:"steps"`
@@ -44,6 +49,8 @@ type guideCatalog struct {
 	Tagline   string          `json:"tagline"`
 	Commands  []guideCommand  `json:"commands"`
 	Workflows []guideWorkflow `json:"workflows"`
+	Tips      []guideNote     `json:"tips"`
+	Gotchas   []guideNote     `json:"gotchas"`
 }
 
 func buildGuide() guideCatalog {
@@ -236,7 +243,7 @@ func buildGuide() guideCatalog {
 				Name:     "import-traefik",
 				Summary:  "Import existing Traefik configuration into hotify",
 				Category: "dns-traefik",
-				Note:     "One-shot migration tool. Reads current /etc/traefik/dynamic.yml and registers apps in config.json.",
+				Note:     "One-shot migration tool. Reads current /etc/traefik/dynamic.yml and registers apps in config.json. After import, apps may need backend_url set manually for remote backends.",
 			},
 
 			// ── Docker ─────────────────────────────────────────────────
@@ -393,6 +400,98 @@ func buildGuide() guideCatalog {
 				Category: "meta",
 			},
 		},
+		Tips: []guideNote{
+			{
+				Topic: "safe-apply",
+				Detail: "Always preview before applying: setup-traefik --id <app> --dry-run --local. " +
+					"Review the diff, then run without --dry-run. Never skip this — setup-traefik " +
+					"regenerates ALL apps' dynamic config from config.json.",
+			},
+			{
+				Topic: "cloudflare-token-sync",
+				Detail: "Remote servers need the Cloudflare token for ACME DNS challenges. " +
+					"Copy config: scp ~/.hotify/config.json <host>:/tmp/ && " +
+					"ssh <host> 'mkdir -p ~/.hotify && mv /tmp/hotify-config.json ~/.hotify/config.json'. " +
+					"Or use --challenge-type http instead (no CF token needed).",
+			},
+			{
+				Topic: "prefer-dns-challenge",
+				Detail: "DNS challenge (--challenge-type dns) is more reliable than HTTP challenge. " +
+					"HTTP requires port 80 accessible from the internet and can fail with 404 errors " +
+					"during initial ACME setup. DNS challenge works even if the app isn't running yet.",
+			},
+			{
+				Topic: "acme-timing",
+				Detail: "After setup-traefik, wait 10-30s for Let's Encrypt certificate generation before " +
+					"testing the domain. Verify in /etc/traefik/acme.json.",
+			},
+			{
+				Topic: "basic-auth-apply",
+				Detail: "basic-auth only modifies config.json. The Traefik middleware isn't created until " +
+					"you run setup-traefik --id <app> --local. Always call setup-traefik after adding/removing users.",
+			},
+			{
+				Topic: "cross-suggestions",
+				Detail: "Commands suggest next steps: after setup-dns → suggests setup-traefik if missing; " +
+					"after setup-traefik → suggests setup-dns if missing. Don't skip these — " +
+					"if DNS is missing the domain won't resolve; if Traefik is missing the cert won't issue.",
+			},
+			{
+				Topic: "iliffe-cluster-dk-access",
+				Detail: "On the JAR network, always use --local for DNS/Traefik operations on dk1. " +
+					"This bypasses the remote daemon auth and avoids SSH key issues.",
+			},
+		},
+		Gotchas: []guideNote{
+			{
+				Topic: "backend-url-remote",
+				Detail: "Never use 127.0.0.1 as backend URL for remote apps. Traefik runs on the proxy server (dk1), " +
+					"so 127.0.0.1 points to the proxy, not the remote service. Always use the remote machine's " +
+					"Tailscale IP (e.g., http://100.123.0.125:7000). Verify after setup: grep url /etc/traefik/dynamic.yml.",
+			},
+			{
+				Topic: "domain-duplication",
+				Detail: "Domains can get duplicated (app.example.com.example.com) if re-running setup with " +
+					"existing config. Fix: sed -i 's/app.example.com.example.com/app.example.com/g' " +
+					"~/.hotify/config.json && sudo systemctl restart traefik.",
+			},
+			{
+				Topic: "tailscale-funnel-port-443",
+				Detail: "Tailscale Funnel uses port 443 and conflicts with Traefik's HTTPS endpoint. " +
+					"If you get connection resets on port 443, check: tailscale funnel status. " +
+					"Disable with: tailscale funnel reset. Also check iptables for redirect rules.",
+			},
+			{
+				Topic: "process-manager-conflict",
+				Detail: "Never run multiple process managers for the same app. If migrating an app from systemd " +
+					"to hotify: Add to hotify → Setup DNS/Traefik → Test → Stop old manager → Start via hotify. " +
+					"Check for conflicts: systemctl list-units --all | grep <app>.",
+			},
+			{
+				Topic: "setup-traefik-regenerates-all",
+				Detail: "setup-traefik regenerates the ENTIRE /etc/traefik/dynamic.yml from config.json, not just " +
+					"the specified app. Apps without backend_url in config.json will have their backend reset to " +
+					"http://127.0.0.1:<port>. To prevent: always set backend_url via setup --backend-url for remote apps.",
+			},
+			{
+				Topic: "no-traefik-reload",
+				Detail: "Traefik does not support 'reload' (it returns an error). Always use restart: " +
+					"sudo systemctl restart traefik. With watch:true in providers.file, Traefik auto-reloads " +
+					"when dynamic.yml changes — no restart needed.",
+			},
+			{
+				Topic: "http-challenge-redirect",
+				Detail: "HTTP-to-HTTPS redirect breaks ACME HTTP challenges. hotify-cli handles this automatically " +
+					"via smart redirect: temporarily disables redirect, gets the cert, then re-enables. " +
+					"If ACME fails with HTTP challenge, use --challenge-type dns instead.",
+			},
+			{
+				Topic: "path-prefix-manual",
+				Detail: "--path-prefix is stored in config.json but setup-traefik does NOT generate the Traefik " +
+					"addPrefix middleware. You must manually edit /etc/traefik/dynamic.yml to add the " +
+					"middleware config. This is a known limitation (GitHub issue #1).",
+			},
+		},
 		Workflows: []guideWorkflow{
 			{
 				Name:  "new-app",
@@ -509,6 +608,20 @@ func renderGuideText(g guideCatalog) string {
 			if cmd.Note != "" {
 				fmt.Fprintf(&b, "    ⓘ %s\n", cmd.Note)
 			}
+		}
+	}
+
+	if len(g.Tips) > 0 {
+		fmt.Fprintf(&b, "\nTips:\n")
+		for _, t := range g.Tips {
+			fmt.Fprintf(&b, "  %s:\n    %s\n", t.Topic, t.Detail)
+		}
+	}
+
+	if len(g.Gotchas) > 0 {
+		fmt.Fprintf(&b, "\nGotchas:\n")
+		for _, gk := range g.Gotchas {
+			fmt.Fprintf(&b, "  %s:\n    %s\n", gk.Topic, gk.Detail)
 		}
 	}
 
