@@ -107,8 +107,11 @@ func main() {
 	case "help", "--help", "-h":
 		printHelp()
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", command)
-		printHelp()
+		fmt.Fprintf(os.Stderr, "hotify-cli: unknown command %q\n", command)
+		if suggestion := suggestCommand(command); suggestion != "" {
+			fmt.Fprintf(os.Stderr, "Did you mean %q?\n", suggestion)
+		}
+		fmt.Fprintf(os.Stderr, "Run 'hotify-cli help' for usage.\n")
 		os.Exit(1)
 	}
 }
