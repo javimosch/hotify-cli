@@ -17,3 +17,4 @@ hotify-cli-optimized
 *.swp
 Thumbs.db
 .vscode/
+coverage.out
