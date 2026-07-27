@@ -71,22 +71,35 @@ func dynamicConfigWriterLoop() {
 
 // writeDynamicConfigAtomic writes yaml to a temp file then renames atomically.
 func writeDynamicConfigAtomic(config *Config) error {
-	tmpPath := traefikDynamic + ".tmp"
+	target := dynamicTargetPath(config)
+	tmpPath := target + ".tmp"
 	content, err := buildDynamicYAML(config)
 	if err != nil {
 		return err
 	}
+	// Carry through any router/service/middleware in the target that hotify does
+	// not author, so `setup-traefik` no longer erases config written by another
+	// tool (or by hand). Hotify still wins on a name collision.
+	content, preserved := mergeForeignSections(content, target, config)
+	if len(preserved) > 0 {
+		log.Printf("[hotify] preserved %d non-hotify Traefik entr(ies): %s",
+			len(preserved), strings.Join(preserved, ", "))
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", filepath.Dir(target), err)
+	}
 	if err := os.WriteFile(tmpPath, []byte(content), 0644); err != nil {
 		return fmt.Errorf("write tmp: %w", err)
 	}
-	if err := os.Rename(tmpPath, traefikDynamic); err != nil {
+	if err := os.Rename(tmpPath, target); err != nil {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("rename: %w", err)
 	}
 	return nil
 }
 
-const (
+// These are variables (not const) so tests can override them with temp directories.
+var (
 	traefikConfigDir = "/etc/traefik"
 	traefikDynamic   = "/etc/traefik/dynamic.yml"
 	traefikMain      = "/etc/traefik/traefik.yml"
@@ -283,18 +296,10 @@ func setupTraefikConfig(config *Config, challengeType TraefikChallengeType, enab
 	}
 
 	// Build the providers block
-	providersBlock := `providers:
-  file:
-    filename: /etc/traefik/dynamic.yml
-    watch: true`
+	mode := resolveTraefikMode(config)
+	providersBlock := providersBlockFor(mode, false)
 	if enableDocker {
-		providersBlock = `providers:
-  docker:
-    endpoint: "unix:///var/run/docker.sock"
-    exposedByDefault: false
-  file:
-    filename: /etc/traefik/dynamic.yml
-    watch: true`
+		providersBlock = providersBlockFor(mode, true)
 	}
 
 	// Build the entryPoints block with optional redirect
@@ -372,9 +377,10 @@ certificatesResolvers:
 // extracts backend URLs keyed by app ID.  This is used as a fallback when
 // buildDynamicYAML runs for a single app update — it preserves previously
 // configured remote backend URLs that haven't been added to config.json yet.
-func readExistingBackendURLs() map[string]string {
+func readExistingBackendURLs(config *Config) map[string]string {
 	urls := make(map[string]string)
-	data, err := os.ReadFile(traefikDynamic)
+	// read whichever file hotify actually writes (file vs directory mode)
+	data, err := os.ReadFile(dynamicTargetPath(config))
 	if err != nil {
 		return urls // file doesn't exist yet or can't be read — fine
 	}
@@ -439,7 +445,7 @@ func buildDynamicYAML(config *Config) (string, error) {
 
 	// Snapshot existing backend URLs so we preserve remote backends even when
 	// config.json doesn't have backend_url set (hotify-cli bug workaround).
-	existingURLs := readExistingBackendURLs()
+	existingURLs := readExistingBackendURLs(config)
 
 	var sb strings.Builder
 	sb.WriteString("http:\n  routers:\n")

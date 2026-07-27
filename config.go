@@ -104,6 +104,11 @@ type Config struct {
 	Apps            []App         `json:"apps"`
 	Security        SecurityConfig `json:"security"`
 	Remotes         []Remote      `json:"remotes"`
+	// TraefikMode selects the provider layout hotify writes: "file" (a single
+	// dynamic.yml) or "directory" (a watched dir, so other tools can drop in their
+	// own router files). Empty = infer from the live traefik.yml, so an existing
+	// install keeps behaving exactly as before.
+	TraefikMode     string        `json:"traefik_mode,omitempty"`
 }
 
 type Remote struct {
