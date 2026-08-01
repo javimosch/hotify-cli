@@ -506,6 +506,13 @@ func buildGuide() guideCatalog {
 					"setup --id <id> --backend-url http://<tailscale-ip>:<port>. Then setup-dns + setup-traefik as normal.",
 			},
 			{
+				Name:  "proxy-service",
+				Steps: []string{"init", "setup", "setup-dns", "setup-traefik"},
+				Detail: "For proxy-style services like sl-cli. Use --backend-url and --path-prefix: " +
+					"setup --id slv2 --domain slv2 --port 3100 --cmd 'true' --backend-url http://127.0.0.1:3100 --path-prefix /slv2 " +
+					"→ setup-dns --id slv2 → setup-traefik --id slv2.",
+			},
+			{
 				Name:  "update-app",
 				Steps: []string{"setup", "setup-dns", "setup-traefik", "restart"},
 				Detail: "setup --id <id> --port <new-port> (or other fields) → setup-traefik --id <id> → restart --id <id>",
