@@ -375,6 +375,49 @@ func TestBuildDynamicYAML_PreservesExistingURLs(t *testing.T) {
 
 // ─── readExistingBackendURLs (via buildDynamicYAML) ────────────────────────
 
+func TestBuildDynamicYAML_PathPrefixAndBackendURL(t *testing.T) {
+	origPath := traefikDynamic
+	defer func() { traefikDynamic = origPath }()
+
+	tmpDir := t.TempDir()
+	traefikDynamic = filepath.Join(tmpDir, "dynamic.yml")
+
+	config := &Config{
+		Apps: []App{
+			{
+				ID:         "slv2",
+				Name:       "SuperLandings v2",
+				Domain:     "slv2.example.com",
+				Port:       3100,
+				Command:    "true",
+				BackendURL: "http://127.0.0.1:3100",
+				PathPrefix: "/slv2",
+			},
+		},
+	}
+
+	yaml, err := buildDynamicYAML(config)
+	if err != nil {
+		t.Fatalf("buildDynamicYAML failed: %v", err)
+	}
+
+	if !strings.Contains(yaml, "rule: \"Host(`slv2.example.com`)\"") {
+		t.Error("YAML missing Host rule for slv2")
+	}
+	if !strings.Contains(yaml, `url: "http://127.0.0.1:3100"`) {
+		t.Error("YAML missing backend URL for slv2")
+	}
+	if !strings.Contains(yaml, "slv2-addprefix:") {
+		t.Error("YAML missing addPrefix middleware declaration")
+	}
+	if !strings.Contains(yaml, `prefix: "/slv2"`) {
+		t.Error("YAML missing /slv2 prefix value")
+	}
+	if !strings.Contains(yaml, "- slv2-addprefix") {
+		t.Error("YAML missing addPrefix middleware reference in router")
+	}
+}
+
 func TestReadExistingBackendURLs_YAMLParsing(t *testing.T) {
 	origPath := traefikDynamic
 	defer func() { traefikDynamic = origPath }()
