@@ -261,15 +261,30 @@ func handleSetupTraefikCLI() {
 			}, format)
 			os.Exit(ExitTraefikConfigInvalid)
 		}
+
+		data := map[string]interface{}{
+			"app_id":         *id,
+			"challenge_type": string(ct),
+			"redirect_enabled": !*noRedirect,
+			"action":         "traefik_configured",
+		}
+
+		// Show proxy settings when present so users can verify the generated
+		// Traefik router/service targets the intended backend.
+		if config, err := loadConfig(); err == nil {
+			for _, app := range config.Apps {
+				if app.ID == *id {
+					data["backend_url"] = app.BackendURL
+					data["path_prefix"] = app.PathPrefix
+					break
+				}
+			}
+		}
+
 		printOutput(CommandResult{
 			Version: Version,
 			Success: true,
-			Data: map[string]interface{}{
-				"app_id":         *id,
-				"challenge_type": string(ct),
-				"redirect_enabled": !*noRedirect,
-				"action":         "traefik_configured",
-			},
+			Data:    data,
 		}, format)
 		return
 	}
