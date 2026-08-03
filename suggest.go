@@ -20,6 +20,7 @@ var knownCommands = []string{
 	"deploy",
 	"setup-dns",
 	"setup-traefik",
+	"setup-routing",
 	"docker",
 	"compose",
 	"deploy-compose",

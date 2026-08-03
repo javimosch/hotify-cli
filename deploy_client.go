@@ -215,6 +215,15 @@ func (d *DeploymentClient) SetupTraefikApp(appID, challengeType string, noRedire
 	return d.HTTPClient.Post(fmt.Sprintf("/api/remote/apps/%s/setup-traefik", appID), payload)
 }
 
+// SetupRoutingApp regenerates only the Traefik dynamic config for an app remotely.
+func (d *DeploymentClient) SetupRoutingApp(appID string, restart, dryRun bool) (map[string]interface{}, error) {
+	payload := map[string]interface{}{
+		"restart":  restart,
+		"dry_run":  dryRun,
+	}
+	return d.HTTPClient.PostWithData(fmt.Sprintf("/api/remote/apps/%s/setup-routing", appID), payload)
+}
+
 // SetupDNSApp configures DNS for a specific app remotely.
 func (d *DeploymentClient) SetupDNSApp(appID, ip string) error {
 	payload := map[string]interface{}{}

@@ -179,6 +179,7 @@ var EndpointPermissions = []EndpointPermission{
 	// Remote App Operations (v2.7.3+)
 	{"/api/remote/apps/*/basic-auth", "POST", []Permission{PermissionConfig}, "Manage basic auth"},
 	{"/api/remote/apps/*/setup-traefik", "POST", []Permission{PermissionConfig}, "Setup Traefik"},
+	{"/api/remote/apps/*/setup-routing", "POST", []Permission{PermissionConfig}, "Setup routing"},
 	{"/api/remote/apps/*/setup-dns", "POST", []Permission{PermissionConfig}, "Setup DNS"},
 
 	// Traefik System

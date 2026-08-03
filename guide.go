@@ -225,6 +225,20 @@ func buildGuide() guideCatalog {
 				Note:   "⚠ Regenerates ALL apps. Apps without backend_url in config.json may lose remote backends. To prevent: set backend_url via setup --backend-url.",
 			},
 			{
+				Name:     "setup-routing",
+				Summary:  "Regenerate Traefik router/service config only (no ACME or service restart unless --restart).",
+				Category: "dns-traefik",
+				Flags: []guideFlag{
+					{Name: "--id", Type: "string", Default: "", Req: "yes", Description: "App ID"},
+					{Name: "--restart", Type: "bool", Default: "false", Req: "no", Description: "Restart Traefik after regenerating routing"},
+					{Name: "--dry-run", Type: "bool", Default: "false", Req: "no", Description: "Preview changes without applying"},
+					{Name: "--local", Type: "bool", Default: "false", Req: "no", Description: "Execute directly on local server"},
+				},
+				Before: []string{"setup-traefik"},
+				After:  []string{"setup"},
+				Note:   "Lightweight alternative to setup-traefik for proxy services: only touches /etc/traefik/dynamic.yml (or dynamic.d/00-hotify.yml) and preserves foreign config.",
+			},
+			{
 				Name:     "basic-auth",
 				Summary:  "Manage Traefik HTTP basic auth credentials for an app. Run setup-traefik after changes.",
 				Category: "dns-traefik",

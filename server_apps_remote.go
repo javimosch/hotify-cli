@@ -5,12 +5,14 @@ package main
 // Routes registered in server.go:
 //   POST /api/remote/apps/{id}/basic-auth  — manage basic auth credentials
 //   POST /api/remote/apps/{id}/setup-traefik  — configure Traefik for a specific app
+//   POST /api/remote/apps/{id}/setup-routing  — regenerate routing for a specific app
 //   POST /api/remote/apps/{id}/setup-dns     — configure DNS for a specific app
 
 import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 )
 
@@ -47,6 +49,12 @@ func handleAppRemoteAPI(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		handleSetupTraefikRemoteAPI(w, r, appID)
+	case "setup-routing":
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		handleSetupRoutingRemoteAPI(w, r, appID)
 	case "setup-dns":
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -363,12 +371,26 @@ func handleSetupTraefikRemoteAPI(w http.ResponseWriter, r *http.Request, appID s
 		Details:   fmt.Sprintf("Traefik configured for app: %s (challenge: %s)", appID, ct),
 		Success:   true,
 	})
+	config, _ := loadConfig()
+	var backendURL, pathPrefix string
+	if config != nil {
+		for _, app := range config.Apps {
+			if app.ID == appID {
+				backendURL = app.BackendURL
+				pathPrefix = app.PathPrefix
+				break
+			}
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success":          true,
 		"app_id":           appID,
 		"challenge_type":   string(ct),
 		"redirect_enabled": !payload.NoRedirect,
+		"backend_url":      backendURL,
+		"path_prefix":      pathPrefix,
 		"action":           "traefik_configured",
 	})
 }
@@ -425,5 +447,92 @@ func handleSetupDNSRemoteAPI(w http.ResponseWriter, r *http.Request, appID strin
 		"ip":      resolvedIP,
 		"action":  "dns_configured",
 		"warning": warn,
+	})
+}
+
+// handleSetupRoutingRemoteAPI regenerates only the Traefik dynamic config remotely.
+//
+// Request body:
+//
+//	{
+//	  "restart": false,
+//	  "dry_run": false
+//	}
+func handleSetupRoutingRemoteAPI(w http.ResponseWriter, r *http.Request, appID string) {
+	var payload struct {
+		Restart bool `json:"restart"`
+		DryRun  bool `json:"dry_run"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if payload.DryRun {
+		config, err := loadConfig()
+		if err != nil {
+			http.Error(w, "Config load failed", http.StatusInternalServerError)
+			return
+		}
+
+		proposed, err := buildDynamicYAML(config)
+		if err != nil {
+			http.Error(w, "Failed to build dynamic config: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		proposed, _ = mergeForeignSections(proposed, dynamicTargetPath(config), config)
+
+		current := ""
+		if data, err := os.ReadFile(dynamicTargetPath(config)); err == nil {
+			current = string(data)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"app_id":  appID,
+			"dry_run": true,
+			"diff":    simpleDiff(current, proposed),
+		})
+		return
+	}
+
+	if err := setupRoutingForApp(appID, payload.Restart); err != nil {
+		auditLogger.LogEvent(AuditEvent{
+			EventType: AuditEventAuthFailed,
+			TokenName: r.Header.Get("X-API-Key-Name"),
+			Details:   fmt.Sprintf("Setup routing failed for %s: %v", appID, err),
+			Success:   false,
+		})
+		http.Error(w, "Routing setup failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	config, _ := loadConfig()
+	var backendURL, pathPrefix string
+	if config != nil {
+		for _, app := range config.Apps {
+			if app.ID == appID {
+				backendURL = app.BackendURL
+				pathPrefix = app.PathPrefix
+				break
+			}
+		}
+	}
+
+	auditLogger.LogEvent(AuditEvent{
+		EventType: AuditEventDeploy,
+		TokenName: r.Header.Get("X-API-Key-Name"),
+		Details:   fmt.Sprintf("Routing configured for app: %s", appID),
+		Success:   true,
+	})
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":      true,
+		"app_id":       appID,
+		"restarted":    payload.Restart,
+		"backend_url":  backendURL,
+		"path_prefix":  pathPrefix,
+		"action":       "routing_configured",
 	})
 }
