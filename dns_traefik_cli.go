@@ -300,7 +300,8 @@ func handleSetupTraefikCLI() {
 		exitClientError(format, err)
 	}
 
-	if err := client.SetupTraefikApp(*id, string(ct), *noRedirect); err != nil {
+	result, err := client.SetupTraefikApp(*id, string(ct), *noRedirect)
+	if err != nil {
 		printOutput(CommandResult{
 			Version: Version, Success: false,
 			Error: &CommandError{
@@ -319,16 +320,21 @@ func handleSetupTraefikCLI() {
 		os.Exit(ExitGenericFailure)
 	}
 
+	// Prefer the remote daemon response so backend_url/path_prefix are shown
+	// when a target configures a proxy service.
+	if result == nil {
+		result = map[string]interface{}{}
+	}
+	result["app_id"] = *id
+	result["target"] = targetObj.Name
+	result["challenge_type"] = string(ct)
+	result["redirect_enabled"] = !*noRedirect
+	result["action"] = "traefik_configured"
+
 	printOutput(CommandResult{
 		Version: Version,
 		Success: true,
-		Data: map[string]interface{}{
-			"app_id":           *id,
-			"target":            targetObj.Name,
-			"challenge_type":    string(ct),
-			"redirect_enabled":  !*noRedirect,
-			"action":            "traefik_configured",
-		},
+		Data:    result,
 	}, format)
 
 	// Cross-suggest: if DNS is not configured, suggest it
