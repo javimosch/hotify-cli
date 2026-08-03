@@ -128,15 +128,19 @@ func setupApp(isUpsert bool) {
 		}
 		config.Apps[existingIdx] = app
 	} else {
-		// New app — all required fields must be present
-		if *name == "" || *domain == "" || *port == 0 || *command == "" {
+		// New app — name, domain, and port are always required; --cmd can be
+		// omitted when --backend-url is provided for externally managed proxies.
+		if *name == "" || *domain == "" || *port == 0 || (*command == "" && *backendURL == "") {
 			result := CommandResult{
 				Version: Version, Success: false,
 				Error: &CommandError{
 					Code: ExitInvalidArgument, Type: "validation_error",
-					Message:     "New app requires --name, --domain, --port, and --cmd",
+					Message:     "New app requires --name, --domain, --port, and --cmd (or --backend-url for proxy apps)",
 					Recoverable: false,
-					Suggestions: []string{"hotify-cli setup --id <id> --name <name> --domain <subdomain> --port <port> --cmd <command>"},
+					Suggestions: []string{
+						"hotify-cli setup --id <id> --name <name> --domain <subdomain> --port <port> --cmd <command>",
+						"hotify-cli setup --id <id> --name <name> --domain <subdomain> --port <port> --backend-url http://<host>:<port>",
+					},
 				},
 			}
 			printOutput(result, format)

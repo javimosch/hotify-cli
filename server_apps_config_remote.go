@@ -115,9 +115,10 @@ func handleRemoteAppSetupAPI(w http.ResponseWriter, r *http.Request, appID strin
 		}
 		config.Apps[existingIdx] = app
 	} else {
-		// New app requires name, domain, port, cmd
-		if payload.Name == "" || payload.Domain == "" || payload.Port == 0 || payload.Command == "" {
-			http.Error(w, "New app requires name, domain, port, and cmd", http.StatusBadRequest)
+		// New app requires name, domain, port; command can be omitted when
+		// backend_url is provided for externally managed proxy services.
+		if payload.Name == "" || payload.Domain == "" || payload.Port == 0 || (payload.Command == "" && payload.BackendURL == "") {
+			http.Error(w, "New app requires name, domain, port, and cmd (or backend_url for proxy apps)", http.StatusBadRequest)
 			return
 		}
 		var fullDomain string
