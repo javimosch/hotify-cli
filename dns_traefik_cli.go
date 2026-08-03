@@ -261,6 +261,18 @@ func handleSetupTraefikCLI() {
 			}, format)
 			os.Exit(ExitTraefikConfigInvalid)
 		}
+		config, _ := loadConfig()
+		var backendURL, pathPrefix string
+		if config != nil {
+			for _, app := range config.Apps {
+				if app.ID == *id {
+					backendURL = app.BackendURL
+					pathPrefix = app.PathPrefix
+					break
+				}
+			}
+		}
+
 		printOutput(CommandResult{
 			Version: Version,
 			Success: true,
@@ -268,6 +280,8 @@ func handleSetupTraefikCLI() {
 				"app_id":         *id,
 				"challenge_type": string(ct),
 				"redirect_enabled": !*noRedirect,
+				"backend_url":    backendURL,
+				"path_prefix":    pathPrefix,
 				"action":         "traefik_configured",
 			},
 		}, format)
