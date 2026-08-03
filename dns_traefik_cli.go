@@ -261,15 +261,22 @@ func handleSetupTraefikCLI() {
 			}, format)
 			os.Exit(ExitTraefikConfigInvalid)
 		}
+		resultData := map[string]interface{}{
+			"app_id":         *id,
+			"challenge_type": string(ct),
+			"redirect_enabled": !*noRedirect,
+			"action":         "traefik_configured",
+		}
+		if cfg, err := loadConfig(); err == nil {
+			if app := findApp(cfg, *id); app != nil {
+				resultData["backend_url"] = app.BackendURL
+				resultData["path_prefix"] = app.PathPrefix
+			}
+		}
 		printOutput(CommandResult{
 			Version: Version,
 			Success: true,
-			Data: map[string]interface{}{
-				"app_id":         *id,
-				"challenge_type": string(ct),
-				"redirect_enabled": !*noRedirect,
-				"action":         "traefik_configured",
-			},
+			Data:    resultData,
 		}, format)
 		return
 	}
@@ -304,16 +311,25 @@ func handleSetupTraefikCLI() {
 		os.Exit(ExitGenericFailure)
 	}
 
+	resultData := map[string]interface{}{
+		"app_id":           *id,
+		"target":            targetObj.Name,
+		"challenge_type":    string(ct),
+		"redirect_enabled":  !*noRedirect,
+		"action":            "traefik_configured",
+	}
+	if appData, err := client.GetAppConfig(*id); err == nil {
+		if bu, ok := appData["backend_url"].(string); ok {
+			resultData["backend_url"] = bu
+		}
+		if pp, ok := appData["path_prefix"].(string); ok {
+			resultData["path_prefix"] = pp
+		}
+	}
 	printOutput(CommandResult{
 		Version: Version,
 		Success: true,
-		Data: map[string]interface{}{
-			"app_id":           *id,
-			"target":            targetObj.Name,
-			"challenge_type":    string(ct),
-			"redirect_enabled":  !*noRedirect,
-			"action":            "traefik_configured",
-		},
+		Data:    resultData,
 	}, format)
 
 	// Cross-suggest: if DNS is not configured, suggest it

@@ -363,14 +363,21 @@ func handleSetupTraefikRemoteAPI(w http.ResponseWriter, r *http.Request, appID s
 		Details:   fmt.Sprintf("Traefik configured for app: %s (challenge: %s)", appID, ct),
 		Success:   true,
 	})
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	result := map[string]interface{}{
 		"success":          true,
 		"app_id":           appID,
 		"challenge_type":   string(ct),
 		"redirect_enabled": !payload.NoRedirect,
 		"action":           "traefik_configured",
-	})
+	}
+	if cfg, err := loadConfig(); err == nil {
+		if app := findApp(cfg, appID); app != nil {
+			result["backend_url"] = app.BackendURL
+			result["path_prefix"] = app.PathPrefix
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
 }
 
 // handleSetupDNSRemoteAPI handles per-app DNS configuration remotely.
