@@ -321,10 +321,12 @@ func handleSetupTraefikCLI() {
 	}
 
 	// Prefer the remote daemon response so backend_url/path_prefix are shown
-	// when a target configures a proxy service.
+	// when a target configures a proxy service. Strip the nested "success" key
+	// to avoid redundancy with the top-level CommandResult.Success field.
 	if result == nil {
 		result = map[string]interface{}{}
 	}
+	delete(result, "success")
 	result["app_id"] = *id
 	result["target"] = targetObj.Name
 	result["challenge_type"] = string(ct)
