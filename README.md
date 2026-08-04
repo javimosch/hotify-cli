@@ -204,6 +204,27 @@ set `backend_url` to the remote machine's address:
 
 When set, Traefik routes to this URL instead of the default `http://127.0.0.1:<port>`.
 
+### Proxy Services
+
+For external services that only need Traefik reverse-proxy routing (no hotify process management), register the app with `--backend-url` and then run `setup-traefik`:
+
+```bash
+# Example: sl-cli static site running on port 3100 with a path prefix
+hotify-cli setup \
+  --id slv2 \
+  --name "SL v2" \
+  --domain slv2 \
+  --port 3100 \
+  --cmd "/usr/local/bin/sl-cli serve" \
+  --backend-url "http://127.0.0.1:3100" \
+  --path-prefix "/slv2"
+
+hotify-cli setup-dns --id slv2
+hotify-cli setup-traefik --id slv2
+```
+
+This generates both the router and the service in `/etc/traefik/dynamic.yml`, including the `addPrefix` middleware if `--path-prefix` is set.
+
 **⚠️ Critical**: hotify-cli's `buildDynamicYAML()` regenerates the **entire** `/etc/traefik/dynamic.yml`
 when `setup-traefik` is called for **any single app**. If an app lacks `backend_url`,
 it falls back to `127.0.0.1:<port>`. This means remote apps lose their correct backend
