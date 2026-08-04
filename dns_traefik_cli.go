@@ -261,6 +261,20 @@ func handleSetupTraefikCLI() {
 			}, format)
 			os.Exit(ExitTraefikConfigInvalid)
 		}
+
+		// Include proxy fields so users can confirm the backend_url/path_prefix
+		// that will be written to Traefik's dynamic config.
+		var backendURL, pathPrefix string
+		if cfg, err := loadConfig(); err == nil {
+			for _, app := range cfg.Apps {
+				if app.ID == *id {
+					backendURL = app.BackendURL
+					pathPrefix = app.PathPrefix
+					break
+				}
+			}
+		}
+
 		printOutput(CommandResult{
 			Version: Version,
 			Success: true,
@@ -268,6 +282,8 @@ func handleSetupTraefikCLI() {
 				"app_id":         *id,
 				"challenge_type": string(ct),
 				"redirect_enabled": !*noRedirect,
+				"backend_url":    backendURL,
+				"path_prefix":    pathPrefix,
 				"action":         "traefik_configured",
 			},
 		}, format)
@@ -285,7 +301,8 @@ func handleSetupTraefikCLI() {
 		exitClientError(format, err)
 	}
 
-	if err := client.SetupTraefikApp(*id, string(ct), *noRedirect); err != nil {
+	result, err := client.SetupTraefikApp(*id, string(ct), *noRedirect)
+	if err != nil {
 		printOutput(CommandResult{
 			Version: Version, Success: false,
 			Error: &CommandError{
@@ -304,16 +321,26 @@ func handleSetupTraefikCLI() {
 		os.Exit(ExitGenericFailure)
 	}
 
+	data := map[string]interface{}{
+		"app_id":           *id,
+		"target":            targetObj.Name,
+		"challenge_type":    string(ct),
+		"redirect_enabled":  !*noRedirect,
+		"action":            "traefik_configured",
+	}
+	if result != nil {
+		if v, ok := result["backend_url"].(string); ok {
+			data["backend_url"] = v
+		}
+		if v, ok := result["path_prefix"].(string); ok {
+			data["path_prefix"] = v
+		}
+	}
+
 	printOutput(CommandResult{
 		Version: Version,
 		Success: true,
-		Data: map[string]interface{}{
-			"app_id":           *id,
-			"target":            targetObj.Name,
-			"challenge_type":    string(ct),
-			"redirect_enabled":  !*noRedirect,
-			"action":            "traefik_configured",
-		},
+		Data:    data,
 	}, format)
 
 	// Cross-suggest: if DNS is not configured, suggest it
