@@ -359,6 +359,8 @@ func suggestMissingDNSSetup(appID string) {
 
 // suggestMissingTraefikSetup checks if the app has a router in Traefik's
 // dynamic config. If not, it prints a suggestion to run setup-traefik.
+// For proxy apps it also checks that the configured backend_url matches
+// the service URL currently written to dynamic.yml.
 func suggestMissingTraefikSetup(appID string) {
 	config, err := loadConfig()
 	if err != nil {
@@ -384,7 +386,14 @@ func suggestMissingTraefikSetup(appID string) {
 
 	var dyn struct {
 		HTTP struct {
-			Routers map[string]interface{} `yaml:"routers"`
+			Routers  map[string]interface{} `yaml:"routers"`
+			Services map[string]struct {
+				LoadBalancer struct {
+					Servers []struct {
+						URL string `yaml:"url"`
+					} `yaml:"servers"`
+				} `yaml:"loadBalancer"`
+			} `yaml:"services"`
 		} `yaml:"http"`
 	}
 	if err := yaml.Unmarshal(data, &dyn); err != nil {
@@ -394,5 +403,16 @@ func suggestMissingTraefikSetup(appID string) {
 	if _, exists := dyn.HTTP.Routers[appID]; !exists {
 		fmt.Fprintf(os.Stderr, "\n⚠️  No Traefik route found for app '%s'.\n", appID)
 		fmt.Fprintf(os.Stderr, "   Run: hotify-cli setup-traefik --id %s [--challenge-type dns]\n\n", appID)
+		return
+	}
+
+	// Proxy apps: warn if the dynamic service URL does not match the
+	// configured backend_url, because traffic will still go to the old target.
+	if app.BackendURL != "" {
+		svc, ok := dyn.HTTP.Services[appID]
+		if !ok || len(svc.LoadBalancer.Servers) == 0 || svc.LoadBalancer.Servers[0].URL != app.BackendURL {
+			fmt.Fprintf(os.Stderr, "\n⚠️  Traefik service URL for app '%s' does not match backend_url %s.\n", appID, app.BackendURL)
+			fmt.Fprintf(os.Stderr, "   Run: hotify-cli setup-traefik --id %s [--challenge-type dns]\n\n", appID)
+		}
 	}
 }
