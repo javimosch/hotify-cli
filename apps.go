@@ -206,6 +206,12 @@ func setupApp(isUpsert bool) {
 		},
 	}
 	printOutput(result, format)
+
+	// Cross-suggest: proxy/remote apps need a Traefik router+service
+	// before traffic will reach the backend URL.
+	if app.BackendURL != "" {
+		suggestMissingTraefikSetup(app.ID)
+	}
 }
 
 // addApp is the legacy "add" entrypoint (enforces unique ID)
