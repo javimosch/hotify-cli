@@ -261,15 +261,30 @@ func handleSetupTraefikCLI() {
 			}, format)
 			os.Exit(ExitTraefikConfigInvalid)
 		}
+
+		data := map[string]interface{}{
+			"app_id":         *id,
+			"challenge_type": string(ct),
+			"redirect_enabled": !*noRedirect,
+			"action":         "traefik_configured",
+		}
+
+		// Show proxy settings when present so users can verify the generated
+		// Traefik router/service targets the intended backend.
+		if config, err := loadConfig(); err == nil {
+			for _, app := range config.Apps {
+				if app.ID == *id {
+					data["backend_url"] = app.BackendURL
+					data["path_prefix"] = app.PathPrefix
+					break
+				}
+			}
+		}
+
 		printOutput(CommandResult{
 			Version: Version,
 			Success: true,
-			Data: map[string]interface{}{
-				"app_id":         *id,
-				"challenge_type": string(ct),
-				"redirect_enabled": !*noRedirect,
-				"action":         "traefik_configured",
-			},
+			Data:    data,
 		}, format)
 		return
 	}
@@ -285,7 +300,8 @@ func handleSetupTraefikCLI() {
 		exitClientError(format, err)
 	}
 
-	if err := client.SetupTraefikApp(*id, string(ct), *noRedirect); err != nil {
+	result, err := client.SetupTraefikApp(*id, string(ct), *noRedirect)
+	if err != nil {
 		printOutput(CommandResult{
 			Version: Version, Success: false,
 			Error: &CommandError{
@@ -304,16 +320,23 @@ func handleSetupTraefikCLI() {
 		os.Exit(ExitGenericFailure)
 	}
 
+	// Prefer the remote daemon response so backend_url/path_prefix are shown
+	// when a target configures a proxy service. Strip the nested "success" key
+	// to avoid redundancy with the top-level CommandResult.Success field.
+	if result == nil {
+		result = map[string]interface{}{}
+	}
+	delete(result, "success")
+	result["app_id"] = *id
+	result["target"] = targetObj.Name
+	result["challenge_type"] = string(ct)
+	result["redirect_enabled"] = !*noRedirect
+	result["action"] = "traefik_configured"
+
 	printOutput(CommandResult{
 		Version: Version,
 		Success: true,
-		Data: map[string]interface{}{
-			"app_id":           *id,
-			"target":            targetObj.Name,
-			"challenge_type":    string(ct),
-			"redirect_enabled":  !*noRedirect,
-			"action":            "traefik_configured",
-		},
+		Data:    result,
 	}, format)
 
 	// Cross-suggest: if DNS is not configured, suggest it
