@@ -363,12 +363,24 @@ func handleSetupTraefikRemoteAPI(w http.ResponseWriter, r *http.Request, appID s
 		Details:   fmt.Sprintf("Traefik configured for app: %s (challenge: %s)", appID, ct),
 		Success:   true,
 	})
+
+	// Include proxy fields in the response so callers can confirm routing.
+	var backendURL, pathPrefix string
+	if cfg, err := loadConfig(); err == nil {
+		if app := findApp(cfg, appID); app != nil {
+			backendURL = app.BackendURL
+			pathPrefix = app.PathPrefix
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success":          true,
 		"app_id":           appID,
 		"challenge_type":   string(ct),
 		"redirect_enabled": !payload.NoRedirect,
+		"backend_url":      backendURL,
+		"path_prefix":      pathPrefix,
 		"action":           "traefik_configured",
 	})
 }
