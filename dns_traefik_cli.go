@@ -261,15 +261,24 @@ func handleSetupTraefikCLI() {
 			}, format)
 			os.Exit(ExitTraefikConfigInvalid)
 		}
+		// Surface backend_url/path_prefix so users can verify proxy routing
+		data := map[string]interface{}{
+			"app_id":          *id,
+			"challenge_type":  string(ct),
+			"redirect_enabled": !*noRedirect,
+			"action":          "traefik_configured",
+		}
+		if config, err := loadConfig(); err == nil {
+			if app := findApp(config, *id); app != nil {
+				data["backend_url"] = app.BackendURL
+				data["path_prefix"] = app.PathPrefix
+			}
+		}
+
 		printOutput(CommandResult{
 			Version: Version,
 			Success: true,
-			Data: map[string]interface{}{
-				"app_id":         *id,
-				"challenge_type": string(ct),
-				"redirect_enabled": !*noRedirect,
-				"action":         "traefik_configured",
-			},
+			Data:    data,
 		}, format)
 		return
 	}
@@ -285,7 +294,8 @@ func handleSetupTraefikCLI() {
 		exitClientError(format, err)
 	}
 
-	if err := client.SetupTraefikApp(*id, string(ct), *noRedirect); err != nil {
+	result, err := client.SetupTraefikApp(*id, string(ct), *noRedirect)
+	if err != nil {
 		printOutput(CommandResult{
 			Version: Version, Success: false,
 			Error: &CommandError{
@@ -304,16 +314,14 @@ func handleSetupTraefikCLI() {
 		os.Exit(ExitGenericFailure)
 	}
 
+	if result == nil {
+		result = map[string]interface{}{}
+	}
+	result["target"] = targetObj.Name
 	printOutput(CommandResult{
 		Version: Version,
 		Success: true,
-		Data: map[string]interface{}{
-			"app_id":           *id,
-			"target":            targetObj.Name,
-			"challenge_type":    string(ct),
-			"redirect_enabled":  !*noRedirect,
-			"action":            "traefik_configured",
-		},
+		Data:    result,
 	}, format)
 
 	// Cross-suggest: if DNS is not configured, suggest it
