@@ -53,6 +53,8 @@ func main() {
 		handleSetupDNSCLI()
 	case "setup-traefik":
 		handleSetupTraefikCLI()
+	case "setup-routing":
+		handleSetupRoutingCLI()
 
 	// Docker container management
 	case "docker":
@@ -147,8 +149,11 @@ func printHelp() {
 	fmt.Println()
 	fmt.Println("DNS & Traefik:")
 	fmt.Println("  setup-dns       Create/update Cloudflare DNS A record for an app")
-	fmt.Println("  setup-traefik   Configure Traefik routing for an app")
+	fmt.Println("  setup-traefik   Configure Traefik routing (router + service) for an app")
+	fmt.Println("                  Supports backend-url proxy targets and path-prefix middleware")
 	fmt.Println("                  --challenge-type http|dns  (default: http)")
+	fmt.Println("  setup-routing   Regenerate Traefik dynamic routing only (no ACME restart)")
+	fmt.Println("                  --restart to also restart Traefik, --dry-run to preview")
 	fmt.Println("  basic-auth      Manage Traefik HTTP basic auth credentials for an app")
 	fmt.Println("                  --id <app> --action add --user <u> --password <p>")
 	fmt.Println("                  --id <app> --action add --hash 'user:$apr1$...'  (pre-hashed)")

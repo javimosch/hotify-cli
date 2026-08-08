@@ -128,15 +128,20 @@ func setupApp(isUpsert bool) {
 		}
 		config.Apps[existingIdx] = app
 	} else {
-		// New app — all required fields must be present
-		if *name == "" || *domain == "" || *port == 0 || *command == "" {
+		// New app — all required fields must be present.
+		// For proxy services, --cmd may be omitted when --backend-url is provided
+		// because hotify does not start the backend directly.
+		if *name == "" || *domain == "" || *port == 0 || (*command == "" && *backendURL == "") {
 			result := CommandResult{
 				Version: Version, Success: false,
 				Error: &CommandError{
 					Code: ExitInvalidArgument, Type: "validation_error",
-					Message:     "New app requires --name, --domain, --port, and --cmd",
+					Message:     "New app requires --name, --domain, --port, and --cmd (or --backend-url for proxy services)",
 					Recoverable: false,
-					Suggestions: []string{"hotify-cli setup --id <id> --name <name> --domain <subdomain> --port <port> --cmd <command>"},
+					Suggestions: []string{
+						"hotify-cli setup --id <id> --name <name> --domain <subdomain> --port <port> --cmd <command>",
+						"hotify-cli setup --id <id> --name <name> --domain <subdomain> --port <port> --backend-url <url>",
+					},
 				},
 			}
 			printOutput(result, format)
@@ -200,6 +205,7 @@ func setupApp(isUpsert bool) {
 			"compose_file": app.ComposeFile,
 			"compose_path": app.ComposePath,
 			"backend_url":  app.BackendURL,
+			"path_prefix":  app.PathPrefix,
 		},
 		Metadata: map[string]interface{}{
 			"warnings": warnings,
@@ -336,6 +342,7 @@ func listApps() {
 			"compose_file": app.ComposeFile,
 			"compose_path": app.ComposePath,
 			"backend_url":  app.BackendURL,
+			"path_prefix":  app.PathPrefix,
 		})
 	}
 
@@ -360,6 +367,9 @@ func listApps() {
 			}
 			if app.BackendURL != "" {
 				fmt.Printf("  Backend: %s\n", app.BackendURL)
+			}
+			if app.PathPrefix != "" {
+				fmt.Printf("  Path prefix: %s\n", app.PathPrefix)
 			}
 			fmt.Printf("  Status: %s\n", app.Status)
 			fmt.Println()
