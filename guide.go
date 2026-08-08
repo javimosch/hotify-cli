@@ -486,10 +486,10 @@ func buildGuide() guideCatalog {
 					"If ACME fails with HTTP challenge, use --challenge-type dns instead.",
 			},
 			{
-				Topic: "path-prefix-manual",
-				Detail: "--path-prefix is stored in config.json but setup-traefik does NOT generate the Traefik " +
-					"addPrefix middleware. You must manually edit /etc/traefik/dynamic.yml to add the " +
-					"middleware config. This is a known limitation (GitHub issue #1).",
+				Topic: "path-prefix-auto",
+				Detail: "setup-traefik now generates the addPrefix middleware automatically when --path-prefix " +
+					"is set. Use `hotify-cli setup --id <id> --path-prefix /slv2` then `hotify-cli setup-traefik --id <id>` " +
+					"to route proxy services like sl-cli.",
 			},
 		},
 		Workflows: []guideWorkflow{
@@ -504,6 +504,13 @@ func buildGuide() guideCatalog {
 				Steps: []string{"init", "setup", "setup-dns", "setup-traefik"},
 				Detail: "For apps on a different machine (Tailscale). Use --backend-url during setup: " +
 					"setup --id <id> --backend-url http://<tailscale-ip>:<port>. Then setup-dns + setup-traefik as normal.",
+			},
+			{
+				Name:  "proxy-service",
+				Steps: []string{"init", "setup", "setup-dns", "setup-traefik"},
+				Detail: "For proxy-style services like sl-cli. Use --backend-url and --path-prefix: " +
+					"setup --id slv2 --domain slv2 --port 3100 --cmd 'true' --backend-url http://127.0.0.1:3100 --path-prefix /slv2 " +
+					"→ setup-dns --id slv2 → setup-traefik --id slv2.",
 			},
 			{
 				Name:  "update-app",
