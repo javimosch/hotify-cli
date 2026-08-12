@@ -42,11 +42,14 @@ type TraefikMiddleware struct {
 	BasicAuth struct {
 		Users []string `yaml:"users"`
 	} `yaml:"basicAuth"`
+	AddPrefix struct {
+		Prefix string `yaml:"prefix"`
+	} `yaml:"addPrefix"`
 }
 
 // importTraefikConfig imports existing Traefik configuration into hotify
 func importTraefikConfig() error {
-	dynamicPath := "/etc/traefik/dynamic.yml"
+	dynamicPath := traefikDynamic
 	
 	// Check if Traefik config exists
 	if _, err := os.Stat(dynamicPath); os.IsNotExist(err) {
@@ -91,12 +94,17 @@ func importTraefikConfig() error {
 		// Extract port or backend URL from service
 		port, backendURL := extractPortOrBackendURL(service)
 		
-		// Extract basic auth if configured
+		// Extract basic auth and path-prefix middlewares if configured
 		var basicAuth []string
+		var pathPrefix string
 		for _, middlewareID := range router.Middlewares {
 			if middleware, ok := traefikConfig.HTTP.Middlewares[middlewareID]; ok {
-				basicAuth = middleware.BasicAuth.Users
-				break
+				if len(middleware.BasicAuth.Users) > 0 {
+					basicAuth = append(basicAuth, middleware.BasicAuth.Users...)
+				}
+				if middleware.AddPrefix.Prefix != "" {
+					pathPrefix = middleware.AddPrefix.Prefix
+				}
 			}
 		}
 
@@ -109,8 +117,9 @@ func importTraefikConfig() error {
 			Command:    fmt.Sprintf("# TODO: add command for %s", routerID),
 			Source:     "imported-from-traefik",
 			Status:     "unknown",
-			BasicAuth: basicAuth,
+			BasicAuth:  basicAuth,
 			BackendURL: backendURL,
+			PathPrefix: pathPrefix,
 		}
 
 		importedApps = append(importedApps, app)
