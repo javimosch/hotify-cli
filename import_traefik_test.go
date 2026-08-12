@@ -45,6 +45,42 @@ const proxyBackendURLYAML = `http:
           - url: "http://100.114.4.57:8080"
 `
 
+func TestExtractPortOrBackendURL(t *testing.T) {
+	tests := []struct {
+		name        string
+		url         string
+		wantPort    int
+		wantBackend string
+	}{
+		{"http 127.0.0.1", "http://127.0.0.1:3100", 3100, ""},
+		{"http localhost", "http://localhost:3100", 3100, ""},
+		{"https 127.0.0.1", "https://127.0.0.1:8443", 8443, ""},
+		{"https localhost", "https://localhost:8443", 8443, ""},
+		{"external http", "http://100.114.4.57:8080", 0, "http://100.114.4.57:8080"},
+		{"external https", "https://100.114.4.57:8080", 0, "https://100.114.4.57:8080"},
+		{"external with path", "http://100.114.4.57:8080/slv2", 0, "http://100.114.4.57:8080/slv2"},
+		{"empty servers", "", 0, ""},
+		{"unsupported scheme", "tcp://100.114.4.57:8080", 0, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := TraefikService{}
+			if tt.url != "" {
+				svc.LoadBalancer.Servers = []struct {
+					URL string `yaml:"url"`
+				}{{URL: tt.url}}
+			}
+			gotPort, gotBackend := extractPortOrBackendURL(svc)
+			if gotPort != tt.wantPort {
+				t.Errorf("port: got %d, want %d", gotPort, tt.wantPort)
+			}
+			if gotBackend != tt.wantBackend {
+				t.Errorf("backend URL: got %q, want %q", gotBackend, tt.wantBackend)
+			}
+		})
+	}
+}
+
 func TestImportTraefikConfig_ProxyServicePathPrefix(t *testing.T) {
 	origDynamic := traefikDynamic
 	defer func() { traefikDynamic = origDynamic }()

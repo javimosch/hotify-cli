@@ -166,22 +166,32 @@ func extractDomainFromRule(rule string) string {
 	return rule
 }
 
-// extractPortOrBackendURL extracts port or backend URL from service config
+// extractPortOrBackendURL extracts port or backend URL from service config.
+// Localhost URLs (127.0.0.1 or localhost, http or https) are stored as a port
+// so the app can be managed like a local service; anything else is kept as a
+// backend_url for proxy/Tailscale use cases.
 func extractPortOrBackendURL(service TraefikService) (int, string) {
 	if len(service.LoadBalancer.Servers) == 0 {
 		return 0, ""
 	}
 
 	url := service.LoadBalancer.Servers[0].URL
-	
-	// Check if it's a localhost URL (extract port)
-	if strings.HasPrefix(url, "http://127.0.0.1:") {
-		portStr := strings.TrimPrefix(url, "http://127.0.0.1:")
-		var port int
-		fmt.Sscanf(portStr, "%d", &port)
-		return port, ""
+
+	localPrefixes := []string{
+		"http://127.0.0.1:",
+		"http://localhost:",
+		"https://127.0.0.1:",
+		"https://localhost:",
 	}
-	
+	for _, prefix := range localPrefixes {
+		if strings.HasPrefix(url, prefix) {
+			portStr := strings.TrimPrefix(url, prefix)
+			var port int
+			fmt.Sscanf(portStr, "%d", &port)
+			return port, ""
+		}
+	}
+
 	// External backend URL
 	if strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://") {
 		return 0, url
