@@ -200,6 +200,7 @@ func setupApp(isUpsert bool) {
 			"compose_file": app.ComposeFile,
 			"compose_path": app.ComposePath,
 			"backend_url":  app.BackendURL,
+			"path_prefix":  app.PathPrefix,
 		},
 		Metadata: map[string]interface{}{
 			"warnings": warnings,
@@ -336,6 +337,7 @@ func listApps() {
 			"compose_file": app.ComposeFile,
 			"compose_path": app.ComposePath,
 			"backend_url":  app.BackendURL,
+			"path_prefix":  app.PathPrefix,
 		})
 	}
 
@@ -360,6 +362,9 @@ func listApps() {
 			}
 			if app.BackendURL != "" {
 				fmt.Printf("  Backend: %s\n", app.BackendURL)
+			}
+			if app.PathPrefix != "" {
+				fmt.Printf("  Path prefix: %s\n", app.PathPrefix)
 			}
 			fmt.Printf("  Status: %s\n", app.Status)
 			fmt.Println()
