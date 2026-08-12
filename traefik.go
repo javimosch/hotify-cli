@@ -421,11 +421,16 @@ func readExistingBackendURLs(config *Config) map[string]string {
 			continue
 		}
 
-		// Extract URL from "- url: \"http://...\"" under the current app.
+		// Extract URL from "- url: \"http://...\"" or "- url: http://..." under the current app.
 		if currentApp != "" && strings.Contains(trimmed, "url:") {
-			parts := strings.SplitN(trimmed, "\"", 3)
-			if len(parts) >= 2 {
-				urls[currentApp] = parts[1]
+			// Find the value after "url:" and strip surrounding quotes/whitespace.
+			parts := strings.SplitN(trimmed, "url:", 2)
+			if len(parts) == 2 {
+				url := strings.TrimSpace(parts[1])
+				url = strings.Trim(url, "\"'")
+				if url != "" {
+					urls[currentApp] = url
+				}
 			}
 			currentApp = "" // reset after consuming the url line
 		}
