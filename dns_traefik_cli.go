@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -285,7 +286,8 @@ func handleSetupTraefikCLI() {
 		exitClientError(format, err)
 	}
 
-	if err := client.SetupTraefikApp(*id, string(ct), *noRedirect); err != nil {
+	result, err := client.SetupTraefikApp(*id, string(ct), *noRedirect)
+	if err != nil {
 		printOutput(CommandResult{
 			Version: Version, Success: false,
 			Error: &CommandError{
@@ -305,15 +307,10 @@ func handleSetupTraefikCLI() {
 	}
 
 	printOutput(CommandResult{
-		Version: Version,
-		Success: true,
-		Data: map[string]interface{}{
-			"app_id":           *id,
-			"target":            targetObj.Name,
-			"challenge_type":    string(ct),
-			"redirect_enabled":  !*noRedirect,
-			"action":            "traefik_configured",
-		},
+		Version:  Version,
+		Success:  true,
+		Data:     result,
+		Metadata: map[string]interface{}{"target": targetObj.Name, "timestamp": time.Now().Unix()},
 	}, format)
 
 	// Cross-suggest: if DNS is not configured, suggest it
