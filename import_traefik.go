@@ -108,13 +108,20 @@ func importTraefikConfig() error {
 			}
 		}
 
+		// Proxy-only apps do not need a local command; local apps keep a TODO note
+		// so the operator knows the start command must be filled in manually.
+		command := fmt.Sprintf("# TODO: add command for %s", routerID)
+		if backendURL != "" {
+			command = ""
+		}
+
 		// Create hotify app
 		app := App{
 			ID:         routerID,
 			Name:       routerID, // Use router ID as name (can be updated later)
 			Domain:     domain,
 			Port:       port,
-			Command:    fmt.Sprintf("# TODO: add command for %s", routerID),
+			Command:    command,
 			Source:     "imported-from-traefik",
 			Status:     "unknown",
 			BasicAuth:  basicAuth,

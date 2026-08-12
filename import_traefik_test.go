@@ -161,6 +161,9 @@ func TestImportTraefikConfig_ProxyServiceBackendURL(t *testing.T) {
 	if app.BackendURL != "http://100.114.4.57:8080" {
 		t.Errorf("app.BackendURL: got %q, want %q", app.BackendURL, "http://100.114.4.57:8080")
 	}
+	if app.Command != "" {
+		t.Errorf("app.Command: got %q, want empty for proxy-only app", app.Command)
+	}
 	if app.Port != 0 {
 		t.Errorf("app.Port: got %d, want 0 for external backend URL", app.Port)
 	}
