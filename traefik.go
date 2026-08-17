@@ -439,7 +439,7 @@ func readExistingBackendURLs(config *Config) map[string]string {
 // no prefix is needed).
 func normalizePathPrefix(p string) string {
 	p = strings.TrimSpace(p)
-	p = strings.TrimSuffix(p, "/")
+	p = strings.TrimRight(p, "/")
 	if p != "" && !strings.HasPrefix(p, "/") {
 		p = "/" + p
 	}

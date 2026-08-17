@@ -270,6 +270,8 @@ func TestNormalizePathPrefix(t *testing.T) {
 		"/slv2":       "/slv2",
 		"slv2/":       "/slv2",
 		"/slv2/":      "/slv2",
+		"slv2//":      "/slv2",
+		"/slv2//":     "/slv2",
 		"  /slv2/  ":  "/slv2",
 		"/":           "",
 		"":            "",
