@@ -457,6 +457,36 @@ func TestReadExistingBackendURLs_YAMLParsing(t *testing.T) {
 	}
 }
 
+func TestReadExistingBackendURLs_UnquotedURLs(t *testing.T) {
+	origPath := traefikDynamic
+	defer func() { traefikDynamic = origPath }()
+
+	tmpDir := t.TempDir()
+	traefikDynamic = filepath.Join(tmpDir, "dynamic.yml")
+
+	// YAML values do not have to be quoted; single quotes are also valid.
+	yaml := "http:\n  services:\n    app1:\n      loadBalancer:\n        servers:\n" +
+		"          - url: http://100.123.0.1:8080\n" +
+		"    app2:\n      loadBalancer:\n        servers:\n" +
+		"          - url: 'http://100.123.0.2:9090'\n"
+
+	if err := os.WriteFile(traefikDynamic, []byte(yaml), 0644); err != nil {
+		t.Fatalf("failed to write temp dynamic.yml: %v", err)
+	}
+
+	urls := readExistingBackendURLs(&Config{})
+	if len(urls) != 2 {
+		t.Errorf("expected 2 app URLs, got %d: %v", len(urls), urls)
+	}
+
+	if urls["app1"] != "http://100.123.0.1:8080" {
+		t.Errorf("app1: got URL %q, want %q", urls["app1"], "http://100.123.0.1:8080")
+	}
+	if urls["app2"] != "http://100.123.0.2:9090" {
+		t.Errorf("app2: got URL %q, want %q", urls["app2"], "http://100.123.0.2:9090")
+	}
+}
+
 func TestReadExistingBackendURLs_NoFile(t *testing.T) {
 	origPath := traefikDynamic
 	defer func() { traefikDynamic = origPath }()
