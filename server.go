@@ -1083,6 +1083,7 @@ func handleSetupTraefikAPI(w http.ResponseWriter, r *http.Request) {
 	var payload struct {
 		ID            string `json:"id"`
 		ChallengeType string `json:"challenge_type"`
+		NoRedirect    bool   `json:"no_redirect"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
@@ -1090,19 +1091,47 @@ func handleSetupTraefikAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ct := ChallengeHTTP
-	if payload.ChallengeType == "dns" {
+	var ct TraefikChallengeType
+	switch payload.ChallengeType {
+	case "dns":
 		ct = ChallengeDNS
+	case "http", "":
+		ct = ChallengeHTTP
+	default:
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "challenge_type must be 'http' or 'dns'"})
+		return
 	}
 
-	if err := setupTraefikForAppWithChallenge(payload.ID, ct, false); err != nil {
+	var err error
+	if payload.NoRedirect {
+		err = setupTraefikForAppWithChallengeAndRedirect(payload.ID, ct, false, false)
+	} else {
+		err = setupTraefikForAppWithChallenge(payload.ID, ct, false)
+	}
+	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": err.Error()})
 		return
 	}
 
+	response := map[string]interface{}{
+		"success":          true,
+		"app_id":           payload.ID,
+		"challenge_type":   string(ct),
+		"redirect_enabled": !payload.NoRedirect,
+		"action":           "traefik_configured",
+	}
+	if config, err := loadConfig(); err == nil {
+		if app := findApp(config, payload.ID); app != nil {
+			response["domain"] = app.Domain
+			response["backend_url"] = app.BackendURL
+			response["path_prefix"] = app.PathPrefix
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+	json.NewEncoder(w).Encode(response)
 }
 
 // Authentication Middleware
