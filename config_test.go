@@ -50,6 +50,7 @@ func TestSaveAndLoadConfig(t *testing.T) {
 				Command:    "/usr/bin/app1 start",
 				Status:     "running",
 				BackendURL: "http://10.0.0.1:8080",
+				PathPrefix: "/slv2",
 				PID:        12345,
 				RateLimit:  "10,60m",
 			},
@@ -108,6 +109,9 @@ func TestSaveAndLoadConfig(t *testing.T) {
 		}
 		if app.BackendURL != orig.Apps[i].BackendURL {
 			t.Errorf("app[%d].BackendURL: got %q, want %q", i, app.BackendURL, orig.Apps[i].BackendURL)
+		}
+		if app.PathPrefix != orig.Apps[i].PathPrefix {
+			t.Errorf("app[%d].PathPrefix: got %q, want %q", i, app.PathPrefix, orig.Apps[i].PathPrefix)
 		}
 		if app.RateLimit != orig.Apps[i].RateLimit {
 			t.Errorf("app[%d].RateLimit: got %q, want %q", i, app.RateLimit, orig.Apps[i].RateLimit)
