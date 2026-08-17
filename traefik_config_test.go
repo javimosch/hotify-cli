@@ -260,3 +260,60 @@ func TestSetupTraefikConfig_AcmeJsonExists(t *testing.T) {
 		t.Errorf("acme.json was overwritten: got %q, want %q", string(data), acmeContent)
 	}
 }
+
+// TestNormalizePathPrefix validates that user-supplied path prefixes are
+// normalised to a leading slash with no trailing slash, preventing malformed
+// addPrefix middleware for proxy services.
+func TestNormalizePathPrefix(t *testing.T) {
+	cases := map[string]string{
+		"slv2":        "/slv2",
+		"/slv2":       "/slv2",
+		"slv2/":       "/slv2",
+		"/slv2/":      "/slv2",
+		"slv2//":      "/slv2",
+		"/slv2//":     "/slv2",
+		"  /slv2/  ":  "/slv2",
+		"/":           "",
+		"":            "",
+	}
+	for input, want := range cases {
+		got := normalizePathPrefix(input)
+		if got != want {
+			t.Errorf("normalizePathPrefix(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+// TestBuildDynamicYAML_PathPrefixNormalization ensures buildDynamicYAML emits
+// a correctly normalised addPrefix middleware even when the config value is
+// missing a leading slash or has a trailing slash.
+func TestBuildDynamicYAML_PathPrefixNormalization(t *testing.T) {
+	origPath := traefikDynamic
+	defer func() { traefikDynamic = origPath }()
+
+	tmpDir := t.TempDir()
+	traefikDynamic = filepath.Join(tmpDir, "dynamic.yml")
+
+	config := &Config{
+		Apps: []App{
+			{
+				ID:         "slv2",
+				Name:       "SuperLandings v2",
+				Domain:     "slv2.example.com",
+				Port:       3100,
+				Command:    "true",
+				BackendURL: "http://127.0.0.1:3100",
+				PathPrefix: "slv2/",
+			},
+		},
+	}
+
+	yaml, err := buildDynamicYAML(config)
+	if err != nil {
+		t.Fatalf("buildDynamicYAML failed: %v", err)
+	}
+
+	if !strings.Contains(yaml, `prefix: "/slv2"`) {
+		t.Errorf("expected normalised prefix \"/slv2\" in output:\n%s", yaml)
+	}
+}

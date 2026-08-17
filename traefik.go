@@ -433,6 +433,27 @@ func readExistingBackendURLs(config *Config) map[string]string {
 	return urls
 }
 
+// normalizePathPrefix cleans a user-supplied path prefix so it is safe to use
+// with Traefik's addPrefix middleware. It guarantees a leading slash and no
+// trailing slash, and collapses a bare "/" into the empty string (which means
+// no prefix is needed).
+func normalizePathPrefix(p string) string {
+	p = strings.TrimSpace(p)
+	p = strings.TrimRight(p, "/")
+	if p != "" && !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	if p == "/" {
+		return ""
+	}
+	return p
+}
+
+// appNeedsMiddleware reports whether an app contributes any middleware entries.
+func appNeedsMiddleware(app App) bool {
+	return len(app.BasicAuth) > 0 || app.RateLimit != "" || normalizePathPrefix(app.PathPrefix) != ""
+}
+
 // buildDynamicYAML renders the Traefik dynamic.yml content from the config.
 // TC1 fix: each router TLS section now includes an explicit `domains:` entry
 // so Traefik/ACME can resolve the domain during certificate provisioning.
@@ -456,7 +477,9 @@ func buildDynamicYAML(config *Config) (string, error) {
 		sb.WriteString(fmt.Sprintf("      service: %s\n", app.ID))
 		sb.WriteString("      entryPoints:\n        - websecure\n")
 		// Add path prefix middleware if configured
-		if app.PathPrefix != "" {
+		pathPrefix := normalizePathPrefix(app.PathPrefix)
+		hasPathPrefix := pathPrefix != ""
+		if hasPathPrefix {
 			if len(app.BasicAuth) > 0 {
 				sb.WriteString(fmt.Sprintf("      middlewares:\n        - %s-addprefix\n        - %s-basic-auth\n", app.ID, app.ID))
 			} else {
@@ -503,7 +526,7 @@ func buildDynamicYAML(config *Config) (string, error) {
 	// Emit middlewares section for apps that need them
 	hasMiddleware := false
 	for _, app := range config.Apps {
-		if len(app.BasicAuth) > 0 || app.PathPrefix != "" || app.RateLimit != "" {
+		if appNeedsMiddleware(app) {
 			hasMiddleware = true
 			break
 		}
@@ -511,15 +534,15 @@ func buildDynamicYAML(config *Config) (string, error) {
 	if hasMiddleware {
 		sb.WriteString("  middlewares:\n")
 		for _, app := range config.Apps {
-			needsMiddleware := len(app.BasicAuth) > 0 || app.PathPrefix != "" || app.RateLimit != ""
-			if !needsMiddleware {
+			if !appNeedsMiddleware(app) {
 				continue
 			}
 			// Add addPrefix middleware if path_prefix is set
-			if app.PathPrefix != "" {
+			pathPrefix := normalizePathPrefix(app.PathPrefix)
+			if pathPrefix != "" {
 				sb.WriteString(fmt.Sprintf("    %s-addprefix:\n", app.ID))
 				sb.WriteString("      addPrefix:\n")
-				sb.WriteString(fmt.Sprintf("        prefix: \"%s\"\n\n", app.PathPrefix))
+				sb.WriteString(fmt.Sprintf("        prefix: \"%s\"\n\n", pathPrefix))
 			}
 			// Add basicAuth middleware if configured
 			if len(app.BasicAuth) > 0 {
