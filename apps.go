@@ -104,6 +104,14 @@ func setupApp(isUpsert bool) {
 		}
 		if *domain != "" {
 			app.Domain = getFullDomain(*domain, config.Domain)
+			if err := validateDomain(app.Domain); err != nil {
+				result := CommandResult{
+					Version: Version, Success: false,
+					Error: &CommandError{Code: ExitInvalidArgument, Type: "validation_error", Message: err.Error(), Recoverable: false},
+				}
+				printOutput(result, format)
+				os.Exit(ExitInvalidArgument)
+			}
 		}
 		if *port != 0 {
 			app.Port = *port
@@ -142,10 +150,19 @@ func setupApp(isUpsert bool) {
 			printOutput(result, format)
 			os.Exit(ExitInvalidArgument)
 		}
+		newDomain := getFullDomain(*domain, config.Domain)
+		if err := validateDomain(newDomain); err != nil {
+			result := CommandResult{
+				Version: Version, Success: false,
+				Error: &CommandError{Code: ExitInvalidArgument, Type: "validation_error", Message: err.Error(), Recoverable: false},
+			}
+			printOutput(result, format)
+			os.Exit(ExitInvalidArgument)
+		}
 		config.Apps = append(config.Apps, App{
 			ID:          *id,
 			Name:        *name,
-			Domain:      getFullDomain(*domain, config.Domain),
+			Domain:      newDomain,
 			Port:        *port,
 			Command:     *command,
 			Source:      *source,

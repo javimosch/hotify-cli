@@ -214,11 +214,79 @@ func mergeForeignSections(generated string, existingPath string, config *Config)
 			preserved = append(preserved, section+"/"+name)
 		}
 	}
+
+	// Preserve any top-level section that is NOT "http:" (e.g. tcp:, udp:).
+	// splitHTTPSections only parses the http: block, so we extract these as
+	// raw text from the existing file to carry them through byte-identical.
+	foreignTopLevel := extractNonHTTPSections(string(existingData))
+	if len(foreignTopLevel) > 0 {
+		preserved = append(preserved, foreignTopLevel...)
+	}
+
 	sort.Strings(preserved)
 	if len(preserved) == 0 {
 		return generated, nil
 	}
-	return renderHTTPSections(gen), preserved
+	result := renderHTTPSections(gen)
+	// Append non-http sections after the http: block
+	if len(foreignTopLevel) > 0 {
+		result += renderNonHTTPSections(string(existingData))
+	}
+	return result, preserved
+}
+
+// extractNonHTTPSections returns the names of top-level sections (other than
+// "http:") found in the file, for logging purposes.
+func extractNonHTTPSections(data string) []string {
+	var found []string
+	for _, line := range strings.Split(data, "\n") {
+		trimmed := strings.TrimSpace(line)
+		// Top-level key: no leading space, ends with ":", not a comment
+		if len(line) > 0 && line[0] != ' ' && line[0] != '#' && strings.HasSuffix(trimmed, ":") {
+			if trimmed != "http:" {
+				found = append(found, trimmed)
+			}
+		}
+	}
+	return found
+}
+
+// renderNonHTTPSections extracts all non-http top-level sections from the
+// existing file as raw text and returns them for appending to the generated output.
+func renderNonHTTPSections(data string) string {
+	var sb strings.Builder
+	lines := strings.Split(data, "\n")
+	var inForeign bool
+	var foreignLines []string
+
+	flush := func() {
+		if inForeign && len(foreignLines) > 0 {
+			sb.WriteString(strings.Join(foreignLines, "\n"))
+			if !strings.HasSuffix(sb.String(), "\n") {
+				sb.WriteString("\n")
+			}
+			sb.WriteString("\n")
+		}
+		foreignLines = nil
+	}
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		// Top-level key (no indent)
+		if len(line) > 0 && line[0] != ' ' && line[0] != '#' {
+			flush()
+			inForeign = trimmed != "http:" && strings.HasSuffix(trimmed, ":")
+			if inForeign {
+				foreignLines = []string{line}
+			}
+			continue
+		}
+		if inForeign {
+			foreignLines = append(foreignLines, line)
+		}
+	}
+	flush()
+	return sb.String()
 }
 
 // renderHTTPSections rebuilds a dynamic file from section -> key -> raw block,

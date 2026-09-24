@@ -179,3 +179,102 @@ func TestDynamicTargetPath(t *testing.T) {
 		t.Fatalf("directory mode target = %q", got)
 	}
 }
+
+// ─── validateDomain tests ────────────────────────────────────────────────────
+
+func TestValidateDomain_Valid(t *testing.T) {
+	cases := []string{
+		"myapp.example.com",
+		"app.sub.example.co.uk",
+		"hart.intrane.fr",
+		"dubb.dk1.intrane.fr",
+	}
+	for _, d := range cases {
+		if err := validateDomain(d); err != nil {
+			t.Errorf("validateDomain(%q) should pass, got: %v", d, err)
+		}
+	}
+}
+
+func TestValidateDomain_DoubledSuffix(t *testing.T) {
+	cases := []string{
+		"dubb.dk1.intrane.fr.intrane.fr",
+		"app.example.com.example.com",
+		"x.intrane.fr.intrane.fr",
+	}
+	for _, d := range cases {
+		if err := validateDomain(d); err == nil {
+			t.Errorf("validateDomain(%q) should fail (doubled suffix), but passed", d)
+		}
+	}
+}
+
+func TestValidateDomain_Empty(t *testing.T) {
+	if err := validateDomain(""); err == nil {
+		t.Fatal("validateDomain(\"\") should fail")
+	}
+}
+
+func TestValidateDomain_SinglePart(t *testing.T) {
+	if err := validateDomain("localhost"); err == nil {
+		t.Fatal("validateDomain(\"localhost\") should fail (needs at least 2 parts)")
+	}
+}
+
+// ─── Non-http section preservation tests ─────────────────────────────────────
+
+func TestMergeForeignSections_PreservesNonHTTPSections(t *testing.T) {
+	dir := t.TempDir()
+	// A dynamic file with both http: and tcp: sections
+	existing := writeTmp(t, dir, "dynamic.yml", `http:
+  routers:
+    foreign-app:
+      rule: "Host(` + "`foreign.example.com`" + `)"
+      service: foreign-app
+  services:
+    foreign-app:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:9999"
+tcp:
+  routers:
+    tcp-app:
+      rule: "HostSNI(` + "`tcp.example.com`" + `)"
+      service: tcp-app
+  services:
+    tcp-app:
+      loadBalancer:
+        servers:
+          - address: "127.0.0.1:5432"
+`)
+	cfg := &Config{Apps: []App{{ID: "myapp", Domain: "myapp.example.com", Port: 8080}}}
+	generated := "http:\n  routers:\n    myapp:\n      rule: \"Host(`myapp.example.com`)\"\n      service: myapp\n" +
+		"  services:\n    myapp:\n      loadBalancer:\n        servers:\n          - url: \"http://127.0.0.1:8080\"\n"
+
+	out, preserved := mergeForeignSections(generated, existing, cfg)
+
+	// The tcp: section must survive
+	if !strings.Contains(out, "tcp:") {
+		t.Fatalf("tcp: section was dropped from output:\n%s", out)
+	}
+	if !strings.Contains(out, "tcp-app") {
+		t.Fatalf("tcp router was dropped from output:\n%s", out)
+	}
+	if !strings.Contains(out, "HostSNI") {
+		t.Fatalf("tcp router rule was dropped from output:\n%s", out)
+	}
+	// The foreign http router must also survive
+	if !strings.Contains(out, "foreign-app") {
+		t.Fatalf("foreign http router was dropped:\n%s", out)
+	}
+	// Preserved list should mention tcp:
+	found := false
+	for _, p := range preserved {
+		if p == "tcp:" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("tcp: not in preserved list: %v", preserved)
+	}
+}

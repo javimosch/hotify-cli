@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -264,12 +265,13 @@ func outputAppAction(appID, targetName, action, status string, format OutputForm
 	}, format)
 }
 
-// handlePrune handles: hotify-cli prune [--id <id> | --all] [--target <name>] [--local]
+// handlePrune handles: hotify-cli prune [--id <id> | --all] [--dry-run] [--target <name>] [--local]
 func handlePrune() {
 	format := getOutputFormat()
 	pruneCmd := flag.NewFlagSet("prune", flag.ExitOnError)
 	id := pruneCmd.String("id", "", "App ID to prune (removes DNS + Traefik config for this app)")
 	all := pruneCmd.Bool("all", false, "Prune all removed apps (clean up DNS + Traefik for apps no longer in config)")
+	dryRun := pruneCmd.Bool("dry-run", false, "Preview changes without applying (shows what would be pruned)")
 	targetName := pruneCmd.String("target", "", "Target name for remote execution")
 	local := pruneCmd.Bool("local", false, "Execute locally (ignore target)")
 	pruneCmd.Parse(filterHumanFlag(os.Args[2:]))
@@ -317,17 +319,52 @@ func handlePrune() {
 		// (we don't track which DNS records were created, so we can only warn)
 		warnings = append(warnings,
 			"DNS records in Cloudflare are NOT automatically removed by --all",
-			"Traefik dynamic.yml has been regenerated from current app list",
+			"Traefik dynamic config has been regenerated from current app list",
 			"Manually remove stale DNS records from your Cloudflare dashboard",
 		)
-		if err := updateDynamicConfig(config); err != nil {
-			warnings = append(warnings, fmt.Sprintf("Traefik config update failed: %v", err))
-		} else {
-			if err := restartTraefik(); err != nil {
-				warnings = append(warnings, fmt.Sprintf("Traefik restart failed: %v", err))
+		if *dryRun {
+			// Dry-run: show what would change without writing
+			diff, err := DryRunDiff(config)
+			if err != nil {
+				warnings = append(warnings, fmt.Sprintf("Dry-run diff failed: %v", err))
+			} else if diff == "" {
+				fmt.Println("No changes — current config matches proposed config.")
+			} else {
+				fmt.Println("📋 Proposed Traefik changes (--dry-run):")
+				fmt.Println()
+				for _, line := range strings.Split(diff, "\n") {
+					if len(line) == 0 {
+						continue
+					}
+					prefix := line[0]
+					content := line[1:]
+					switch prefix {
+					case '+':
+						fmt.Printf("  \033[32m+ %s\033[0m\n", content)
+					case '-':
+						fmt.Printf("  \033[31m- %s\033[0m\n", content)
+					default:
+						fmt.Printf("    %s\n", content)
+					}
+				}
 			}
+			fmt.Println()
+			fmt.Println("Dry run — no changes were made.")
+			results = append(results, map[string]interface{}{"action": "rebuild_traefik", "status": "dry-run"})
+		} else {
+			// Use synchronous write (not debounced) so the file is on disk
+			// before we restart Traefik. The debounced writer is fine for the
+			// long-running daemon but a one-shot CLI process exits before the
+			// 5s debounce window fires.
+			if err := writeDynamicConfigAtomic(config); err != nil {
+				warnings = append(warnings, fmt.Sprintf("Traefik config update failed: %v", err))
+			} else {
+				if err := restartTraefik(); err != nil {
+					warnings = append(warnings, fmt.Sprintf("Traefik restart failed: %v", err))
+				}
+			}
+			results = append(results, map[string]interface{}{"action": "rebuild_traefik", "status": "done"})
 		}
-		results = append(results, map[string]interface{}{"action": "rebuild_traefik", "status": "done"})
 	}
 
 	printOutput(CommandResult{

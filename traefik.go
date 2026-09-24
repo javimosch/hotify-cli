@@ -70,6 +70,7 @@ func dynamicConfigWriterLoop() {
 }
 
 // writeDynamicConfigAtomic writes yaml to a temp file then renames atomically.
+// It also keeps a .bak of the previous file so a bad write can be rolled back.
 func writeDynamicConfigAtomic(config *Config) error {
 	target := dynamicTargetPath(config)
 	tmpPath := target + ".tmp"
@@ -87,6 +88,10 @@ func writeDynamicConfigAtomic(config *Config) error {
 	}
 	if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
 		return fmt.Errorf("mkdir %s: %w", filepath.Dir(target), err)
+	}
+	// Keep a backup of the existing file so a bad write can be rolled back.
+	if existing, err := os.ReadFile(target); err == nil && len(existing) > 0 {
+		_ = os.WriteFile(target+".bak", existing, 0644)
 	}
 	if err := os.WriteFile(tmpPath, []byte(content), 0644); err != nil {
 		return fmt.Errorf("write tmp: %w", err)
@@ -264,8 +269,32 @@ func validateApp(app App) error {
 	if app.Domain == "" {
 		return fmt.Errorf("app domain is required for app '%s'", app.ID)
 	}
+	if err := validateDomain(app.Domain); err != nil {
+		return fmt.Errorf("app '%s' has invalid domain: %v", app.ID, err)
+	}
 	if app.Port <= 0 || app.Port > 65535 {
 		return fmt.Errorf("app '%s' has invalid port %d (must be 1-65535)", app.ID, app.Port)
+	}
+	return nil
+}
+
+// validateDomain checks that a domain string is a valid hostname and does not
+// contain doubled suffixes (e.g. "x.intrane.fr.intrane.fr").
+func validateDomain(domain string) error {
+	if domain == "" {
+		return fmt.Errorf("domain is empty")
+	}
+	parts := strings.Split(domain, ".")
+	if len(parts) < 2 {
+		return fmt.Errorf("domain '%s' must have at least two parts (e.g. app.example.com)", domain)
+	}
+	// Detect doubled suffix: if the last N parts repeat the preceding N parts
+	for i := 1; i <= len(parts)/2; i++ {
+		tail := strings.Join(parts[len(parts)-i:], ".")
+		precedingTail := strings.Join(parts[len(parts)-2*i:len(parts)-i], ".")
+		if tail == precedingTail && tail != "" {
+			return fmt.Errorf("domain '%s' has a doubled suffix '.%s' — likely a misconfiguration", domain, tail)
+		}
 	}
 	return nil
 }
@@ -708,8 +737,13 @@ func setupTraefikForAppWithChallengeAndRedirect(appID string, challengeType Trae
 		return fmt.Errorf("app '%s' not found in configuration", appID)
 	}
 
-	if err := setupTraefikConfig(config, challengeType, enableDocker, enableRedirect); err != nil {
-		return fmt.Errorf("error setting up traefik config: %v", err)
+	// Only write traefik.yml (main config) if it doesn't exist yet.
+	// On an existing install, setup-traefik should only update dynamic config —
+	// overwriting traefik.yml would clobber manual tweaks (challenge type, entrypoints, etc).
+	if _, err := os.Stat(traefikMain); os.IsNotExist(err) {
+		if err := setupTraefikConfig(config, challengeType, enableDocker, enableRedirect); err != nil {
+			return fmt.Errorf("error setting up traefik config: %v", err)
+		}
 	}
 
 	if err := setupTraefikService(); err != nil {
@@ -931,8 +965,9 @@ func DryRunDiff(config *Config) (string, error) {
 		return "", fmt.Errorf("build proposed config: %w", err)
 	}
 
+	target := dynamicTargetPath(config)
 	current := ""
-	if data, err := os.ReadFile(traefikDynamic); err == nil {
+	if data, err := os.ReadFile(target); err == nil {
 		current = string(data)
 	}
 
