@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 // ─── Debounced dynamic.yml writer ────────────────────────────────────────────
@@ -701,6 +703,45 @@ func restartTraefik() error {
 	return nil
 }
 
+// traefikWatchesDynamicConfig reports whether traefik.yml has a file provider
+// with watch: true, i.e. Traefik reloads route changes on its own.
+func traefikWatchesDynamicConfig(mainPath string) bool {
+	data, err := os.ReadFile(mainPath)
+	if err != nil {
+		return false
+	}
+	var main struct {
+		Providers struct {
+			File struct {
+				Watch     bool   `yaml:"watch"`
+				Directory string `yaml:"directory"`
+				Filename  string `yaml:"filename"`
+			} `yaml:"file"`
+		} `yaml:"providers"`
+	}
+	if err := yaml.Unmarshal(data, &main); err != nil {
+		return false
+	}
+	f := main.Providers.File
+	return f.Watch && (f.Directory != "" || f.Filename != "")
+}
+
+// applyTraefikDynamicConfig makes Traefik pick up a change to the dynamic
+// (routes) config. When Traefik is running and watches that config, the write
+// alone is enough, so it is not restarted: a restart aborts every ACME order in
+// flight, and with the DNS-01 challenge each aborted order leaves an
+// _acme-challenge TXT record behind that makes the retry fail (Cloudflare
+// 81058, "identical record already exists"). Setting up five apps in a row on
+// dk1 left 25 of them and no certificates. Changes to traefik.yml itself still
+// need restartTraefik.
+func applyTraefikDynamicConfig() error {
+	running := exec.Command("sudo", "systemctl", "is-active", "--quiet", "traefik").Run() == nil
+	if running && traefikWatchesDynamicConfig(traefikMain) {
+		return nil
+	}
+	return restartTraefik()
+}
+
 // setupTraefikForApp configures Traefik for a single app (and all current apps).
 // Uses HTTP challenge by default; pass --challenge-type dns to switch.
 func setupTraefikForApp(appID string) error {
@@ -740,7 +781,9 @@ func setupTraefikForAppWithChallengeAndRedirect(appID string, challengeType Trae
 	// Only write traefik.yml (main config) if it doesn't exist yet.
 	// On an existing install, setup-traefik should only update dynamic config —
 	// overwriting traefik.yml would clobber manual tweaks (challenge type, entrypoints, etc).
+	wroteMain := false
 	if _, err := os.Stat(traefikMain); os.IsNotExist(err) {
+		wroteMain = true
 		if err := setupTraefikConfig(config, challengeType, enableDocker, enableRedirect); err != nil {
 			return fmt.Errorf("error setting up traefik config: %v", err)
 		}
@@ -757,7 +800,11 @@ func setupTraefikForAppWithChallengeAndRedirect(appID string, challengeType Trae
 		return fmt.Errorf("error writing dynamic config: %v", err)
 	}
 
-	if err := restartTraefik(); err != nil {
+	apply := applyTraefikDynamicConfig
+	if wroteMain {
+		apply = restartTraefik
+	}
+	if err := apply(); err != nil {
 		return fmt.Errorf("error restarting traefik: %v", err)
 	}
 

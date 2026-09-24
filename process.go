@@ -359,7 +359,7 @@ func handlePrune() {
 			if err := writeDynamicConfigAtomic(config); err != nil {
 				warnings = append(warnings, fmt.Sprintf("Traefik config update failed: %v", err))
 			} else {
-				if err := restartTraefik(); err != nil {
+				if err := applyTraefikDynamicConfig(); err != nil {
 					warnings = append(warnings, fmt.Sprintf("Traefik restart failed: %v", err))
 				}
 			}
@@ -401,7 +401,7 @@ func handleRemotePruneAppAPI(w http.ResponseWriter, r *http.Request, appID strin
 		)
 		if err := updateDynamicConfig(config); err != nil {
 			warnings = append(warnings, "Traefik config update failed: "+err.Error())
-		} else if err := restartTraefik(); err != nil {
+		} else if err := applyTraefikDynamicConfig(); err != nil {
 			warnings = append(warnings, "Traefik restart failed: "+err.Error())
 		}
 		results = append(results, map[string]interface{}{"action": "rebuild_traefik", "status": "done"})
@@ -476,7 +476,7 @@ func pruneApp(appID string, config *Config) (map[string]interface{}, []string) {
 		return map[string]interface{}{"app_id": appID, "status": "partial"}, warnings
 	}
 
-	if err := restartTraefik(); err != nil {
+	if err := applyTraefikDynamicConfig(); err != nil {
 		warnings = append(warnings, fmt.Sprintf("Traefik restart failed: %v", err))
 		return map[string]interface{}{"app_id": appID, "status": "partial"}, warnings
 	}
