@@ -895,8 +895,7 @@ type ACMEData struct {
 func checkCertificateForDomain(domain string) (bool, error) {
 	acmePath := filepath.Join(traefikConfigDir, "acme.json")
 	
-	// Read acme.json
-	data, err := os.ReadFile(acmePath)
+	data, err := readACMEFile(acmePath)
 	if err != nil {
 		return false, fmt.Errorf("failed to read acme.json: %v", err)
 	}
@@ -920,6 +919,48 @@ func checkCertificateForDomain(domain string) (bool, error) {
 	}
 
 	return false, nil
+}
+
+// readACMEFile reads acme.json. Traefik keeps it 0600 under its own user
+// (dk1 runs Traefik as "traefik"), so a direct read by the deploying user is
+// denied; fall back to a non-interactive sudo read before giving up.
+func readACMEFile(path string) ([]byte, error) {
+	data, err := os.ReadFile(path)
+	if err == nil || !os.IsPermission(err) {
+		return data, err
+	}
+	if out, serr := exec.Command("sudo", "-n", "cat", path).Output(); serr == nil {
+		return out, nil
+	}
+	return nil, err
+}
+
+// traefikUsesDNSChallenge reports whether any certificate resolver in
+// traefik.yml uses the DNS-01 challenge. The HTTP-challenge redirect dance in
+// setupTraefikForAppWithSmartRedirect is pointless then: a DNS challenge is not
+// affected by the HTTP->HTTPS redirect, and the setup-traefik --challenge-type
+// flag does not change which challenge an existing traefik.yml uses.
+func traefikUsesDNSChallenge(mainPath string) bool {
+	data, err := os.ReadFile(mainPath)
+	if err != nil {
+		return false
+	}
+	var main struct {
+		CertificatesResolvers map[string]struct {
+			ACME struct {
+				DNSChallenge map[string]interface{} `yaml:"dnsChallenge"`
+			} `yaml:"acme"`
+		} `yaml:"certificatesResolvers"`
+	}
+	if err := yaml.Unmarshal(data, &main); err != nil {
+		return false
+	}
+	for _, r := range main.CertificatesResolvers {
+		if r.ACME.DNSChallenge != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // waitForCertificate waits for a certificate to be issued for the given domain
@@ -968,7 +1009,7 @@ func setupTraefikForAppWithSmartRedirect(appID string, challengeType TraefikChal
 	hasCert, _ := checkCertificateForDomain(appDomain)
 	
 	// If using HTTP challenge and certificate doesn't exist, use smart redirect handling
-	if challengeType == ChallengeHTTP && !hasCert {
+	if challengeType == ChallengeHTTP && !hasCert && !traefikUsesDNSChallenge(traefikMain) {
 		fmt.Printf("🔧 Using HTTP challenge - temporarily disabling redirect for ACME...\n")
 		
 		// Step 1: Setup without redirect

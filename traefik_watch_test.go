@@ -29,3 +29,21 @@ func TestTraefikWatchesDynamicConfig(t *testing.T) {
 		t.Error("missing traefik.yml must not count as watched")
 	}
 }
+
+func TestTraefikUsesDNSChallenge(t *testing.T) {
+	cases := map[string]bool{
+		"certificatesResolvers:\n  letsencrypt:\n    acme:\n      storage: /etc/traefik/acme.json\n      dnsChallenge:\n        provider: cloudflare\n": true,
+		"certificatesResolvers:\n  letsencrypt:\n    acme:\n      httpChallenge:\n        entryPoint: web\n":                                            false,
+		"entryPoints:\n  web:\n    address: :80\n": false,
+	}
+	dir := t.TempDir()
+	for body, want := range cases {
+		p := filepath.Join(dir, "traefik.yml")
+		if err := os.WriteFile(p, []byte(body), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if got := traefikUsesDNSChallenge(p); got != want {
+			t.Errorf("traefikUsesDNSChallenge(%q) = %v, want %v", body, got, want)
+		}
+	}
+}
