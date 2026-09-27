@@ -597,3 +597,61 @@ func TestDryRunDiff(t *testing.T) {
 		t.Log("DryRunDiff returned empty (no changes) — acceptable for identical config")
 	}
 }
+
+func TestBuildDynamicYAML_LoopbackExistingURLDoesNotOverridePort(t *testing.T) {
+	// Regression (2026-09-27): a local app whose port was edited kept the stale
+	// loopback URL from the existing file forever, so the edit never took effect.
+	origPath := traefikDynamic
+	defer func() { traefikDynamic = origPath }()
+	tmpDir := t.TempDir()
+	traefikDynamic = filepath.Join(tmpDir, "dynamic.yml")
+
+	existingYAML := `http:
+  services:
+    calc:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:8799"
+    remote-app:
+      loadBalancer:
+        servers:
+          - url: "http://100.123.0.125:7000"
+`
+	if err := os.WriteFile(traefikDynamic, []byte(existingYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+	config := &Config{Apps: []App{
+		{ID: "calc", Name: "Calc", Domain: "calc.example.com", Port: 8781, Command: "true"},
+		{ID: "remote-app", Name: "Remote", Domain: "remote.example.com", Port: 7000, Command: "true"},
+	}}
+	yaml, err := buildDynamicYAML(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(yaml, `url: "http://127.0.0.1:8781"`) {
+		t.Errorf("edited port must win over a stale loopback URL, got:\n%s", yaml)
+	}
+	if strings.Contains(yaml, "8799") {
+		t.Errorf("stale loopback URL leaked into output:\n%s", yaml)
+	}
+	if !strings.Contains(yaml, `url: "http://100.123.0.125:7000"`) {
+		t.Errorf("remote backend must still be preserved, got:\n%s", yaml)
+	}
+}
+
+func TestIsLoopbackURL(t *testing.T) {
+	for raw, want := range map[string]bool{
+		"http://127.0.0.1:8781":       true,
+		"http://127.1.2.3:80":         true,
+		"http://localhost:3000":       true,
+		"http://[::1]:8080":           true,
+		"http://100.123.0.125:8090":   false,
+		"http://10.0.0.5:80":          false,
+		"https://backend.example.com": false,
+		"::not a url":                 false,
+	} {
+		if got := isLoopbackURL(raw); got != want {
+			t.Errorf("isLoopbackURL(%q) = %v, want %v", raw, got, want)
+		}
+	}
+}

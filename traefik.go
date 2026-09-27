@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -32,7 +34,7 @@ const dynamicWriteDebounce = 5 * time.Second
 
 var (
 	dynamicWriteCh   = make(chan *Config, 64) // buffered so callers never block
-	dynamicWriteOnce sync.Once               // ensures the goroutine starts once
+	dynamicWriteOnce sync.Once                // ensures the goroutine starts once
 )
 
 // startDynamicConfigWriter launches the background flush goroutine. Safe to
@@ -231,13 +233,13 @@ func HtpasswdEntry(user, password string) (string, error) {
 	if _, err := rand.Read(saltBytes); err != nil {
 		return "", fmt.Errorf("error generating salt: %v", err)
 	}
-	
+
 	// Encode salt to printable apr1 alphabet
 	saltStr := ""
 	for _, b := range saltBytes {
 		saltStr += string(apr1Alphabet[int(b)%len(apr1Alphabet)])
 	}
-	
+
 	// Use openssl command for correct APR1-MD5 generation
 	// This is a temporary fix for the APR1-MD5 implementation bug
 	cmd := exec.Command("openssl", "passwd", "-apr1", "-salt", saltStr, password)
@@ -245,7 +247,7 @@ func HtpasswdEntry(user, password string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("openssl command failed: %v", err)
 	}
-	
+
 	// Parse the output which should be in format: $apr1$salt$hash
 	hash := strings.TrimSpace(string(output))
 	return fmt.Sprintf("%s:%s", user, hash), nil
@@ -464,6 +466,25 @@ func readExistingBackendURLs(config *Config) map[string]string {
 	return urls
 }
 
+// isLoopbackURL reports whether a backend URL points at this host (127.0.0.0/8,
+// localhost, ::1). The existing-URL fallback exists to keep REMOTE backends that
+// config.json lacks; a loopback URL carries nothing but a port, and preserving it
+// made app.Port unchangeable — an edited port was silently overridden by the
+// stale URL on every regeneration (comptoir calculators stuck on hart's port,
+// 2026-09-27).
+func isLoopbackURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	h := u.Hostname()
+	if h == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(h)
+	return ip != nil && ip.IsLoopback()
+}
+
 // normalizePathPrefix cleans a user-supplied path prefix so it is safe to use
 // with Traefik's addPrefix middleware. It guarantees a leading slash and no
 // trailing slash, and collapses a bare "/" into the empty string (which means
@@ -547,7 +568,7 @@ func buildDynamicYAML(config *Config) (string, error) {
 		// then fall back to localhost as a last resort.
 		if app.BackendURL != "" {
 			sb.WriteString(fmt.Sprintf("          - url: \"%s\"\n\n", app.BackendURL))
-		} else if existing, ok := existingURLs[app.ID]; ok {
+		} else if existing, ok := existingURLs[app.ID]; ok && !isLoopbackURL(existing) {
 			sb.WriteString(fmt.Sprintf("          - url: \"%s\"\n\n", existing))
 		} else {
 			sb.WriteString(fmt.Sprintf("          - url: \"http://127.0.0.1:%d\"\n\n", app.Port))
@@ -894,7 +915,7 @@ type ACMEData struct {
 // checkCertificateForDomain checks if a valid certificate exists for the given domain
 func checkCertificateForDomain(domain string) (bool, error) {
 	acmePath := filepath.Join(traefikConfigDir, "acme.json")
-	
+
 	data, err := readACMEFile(acmePath)
 	if err != nil {
 		return false, fmt.Errorf("failed to read acme.json: %v", err)
@@ -966,7 +987,7 @@ func traefikUsesDNSChallenge(mainPath string) bool {
 // waitForCertificate waits for a certificate to be issued for the given domain
 func waitForCertificate(domain string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
-	
+
 	for time.Now().Before(deadline) {
 		hasCert, err := checkCertificateForDomain(domain)
 		if err != nil {
@@ -975,11 +996,11 @@ func waitForCertificate(domain string, timeout time.Duration) error {
 		if hasCert {
 			return nil
 		}
-		
+
 		// Wait 2 seconds before checking again
 		time.Sleep(2 * time.Second)
 	}
-	
+
 	return fmt.Errorf("timeout waiting for certificate for domain %s", domain)
 }
 
@@ -1007,16 +1028,16 @@ func setupTraefikForAppWithSmartRedirect(appID string, challengeType TraefikChal
 
 	// Check if certificate already exists
 	hasCert, _ := checkCertificateForDomain(appDomain)
-	
+
 	// If using HTTP challenge and certificate doesn't exist, use smart redirect handling
 	if challengeType == ChallengeHTTP && !hasCert && !traefikUsesDNSChallenge(traefikMain) {
 		fmt.Printf("🔧 Using HTTP challenge - temporarily disabling redirect for ACME...\n")
-		
+
 		// Step 1: Setup without redirect
 		if err := setupTraefikForAppWithChallengeAndRedirect(appID, challengeType, enableDocker, false); err != nil {
 			return fmt.Errorf("failed to setup Traefik without redirect: %v", err)
 		}
-		
+
 		// Step 2: Wait for certificate (with timeout)
 		fmt.Printf("⏳ Waiting for certificate generation (max 60s)...\n")
 		if err := waitForCertificate(appDomain, 60*time.Second); err != nil {
@@ -1026,19 +1047,19 @@ func setupTraefikForAppWithSmartRedirect(appID string, challengeType TraefikChal
 			setupTraefikForAppWithChallengeAndRedirect(appID, challengeType, enableDocker, true)
 			return fmt.Errorf("certificate generation failed: %v (consider using --challenge-type dns)", err)
 		}
-		
+
 		fmt.Printf("✅ Certificate obtained successfully\n")
-		
+
 		// Step 3: Re-enable redirect
 		fmt.Printf("🔧 Re-enabling HTTP-to-HTTPS redirect...\n")
 		if err := setupTraefikForAppWithChallengeAndRedirect(appID, challengeType, enableDocker, true); err != nil {
 			return fmt.Errorf("failed to re-enable redirect: %v", err)
 		}
-		
+
 		fmt.Printf("✅ Traefik configured with redirect for app: %s\n", appID)
 		return nil
 	}
-	
+
 	// For DNS challenge or existing certificates, use normal setup
 	return setupTraefikForAppWithChallengeAndRedirect(appID, challengeType, enableDocker, true)
 }
